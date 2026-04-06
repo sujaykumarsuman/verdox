@@ -18,6 +18,9 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/config"
 	"github.com/sujaykumarsuman/verdox/backend/internal/handler"
 	mw "github.com/sujaykumarsuman/verdox/backend/internal/middleware"
+	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
+	"github.com/sujaykumarsuman/verdox/backend/internal/service"
+	"github.com/sujaykumarsuman/verdox/backend/internal/worker"
 	"github.com/sujaykumarsuman/verdox/backend/pkg/logger"
 	v "github.com/sujaykumarsuman/verdox/backend/pkg/validator"
 )
@@ -83,6 +86,21 @@ func main() {
 
 	// Auth routes
 	registerAuthRoutes(e, db, rdb, cfg, log)
+
+	// Clone worker
+	cloneCh := make(chan service.CloneJob, 100)
+	cloneWorker := worker.NewCloneWorker(
+		repository.NewRepositoryRepository(db),
+		repository.NewTeamRepository(db),
+		cfg, log,
+	)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	go cloneWorker.Start(workerCtx, cloneCh)
+
+	// Team & Repository routes
+	registerTeamRoutes(e, db, rdb, cfg, log)
+	registerRepositoryRoutes(e, db, rdb, cfg, log, cloneCh)
 
 	// Start server
 	port := cfg.AppPort

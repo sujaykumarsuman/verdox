@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/sujaykumarsuman/verdox/backend/pkg/response"
 )
@@ -19,6 +20,7 @@ func New() *CustomValidator {
 
 	_ = v.RegisterValidation("strong_password", strongPassword)
 	_ = v.RegisterValidation("github_url", githubURL)
+	_ = v.RegisterValidation("uuid", validUUID)
 
 	return &CustomValidator{validator: v}
 }
@@ -54,6 +56,8 @@ func msgForTag(fe validator.FieldError) string {
 		return "Must be at least 8 characters with 1 uppercase, 1 lowercase, and 1 digit"
 	case "github_url":
 		return "Must be a valid GitHub repository URL"
+	case "uuid":
+		return "Must be a valid UUID"
 	default:
 		return "Invalid value"
 	}
@@ -82,6 +86,11 @@ var githubURLRegex = regexp.MustCompile(`^https?://github\.com/[\w.-]+/[\w.-]+$`
 
 func githubURL(fl validator.FieldLevel) bool {
 	return githubURLRegex.MatchString(fl.Field().String())
+}
+
+func validUUID(fl validator.FieldLevel) bool {
+	_, err := uuid.Parse(fl.Field().String())
+	return err == nil
 }
 
 func BindAndValidate(c echo.Context, dto interface{}) error {
