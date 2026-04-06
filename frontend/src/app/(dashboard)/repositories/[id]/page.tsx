@@ -353,6 +353,7 @@ export default function RepositoryDetailPage({
                 branch={activeBranch}
                 commitHash={latestCommit?.sha || ""}
                 onRunTriggered={refetchSuites}
+                onDeleted={refetchSuites}
               />
             ))}
           </div>
