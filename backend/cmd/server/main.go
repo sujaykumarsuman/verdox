@@ -18,7 +18,9 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/config"
 	"github.com/sujaykumarsuman/verdox/backend/internal/handler"
 	mw "github.com/sujaykumarsuman/verdox/backend/internal/middleware"
+	"github.com/sujaykumarsuman/verdox/backend/internal/queue"
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
+	"github.com/sujaykumarsuman/verdox/backend/internal/runner"
 	"github.com/sujaykumarsuman/verdox/backend/internal/service"
 	"github.com/sujaykumarsuman/verdox/backend/internal/worker"
 	"github.com/sujaykumarsuman/verdox/backend/pkg/logger"
@@ -98,9 +100,42 @@ func main() {
 	defer workerCancel()
 	go cloneWorker.Start(workerCtx, cloneCh)
 
+	// Redis queue for test runs
+	redisQueue := queue.NewRedisQueue(rdb, cfg.RunnerMaxTimeout, log)
+
+	// GHA poller for tracking dispatched GitHub Actions workflows
+	ghaPoller := runner.NewGHAPoller(db, log)
+
+	// Executors
+	containerExec := runner.NewContainerExecutor(cfg, rdb, redisQueue, log)
+	var ghaExec *runner.GHAExecutor
+	ghaExec = runner.NewGHAExecutor(cfg, log, ghaPoller.Register)
+
 	// Team & Repository routes
 	registerTeamRoutes(e, db, rdb, cfg, log)
 	registerRepositoryRoutes(e, db, rdb, cfg, log, cloneCh)
+
+	// Test suite & run routes
+	registerTestRoutes(e, db, rdb, cfg, log, redisQueue)
+
+	// Webhook routes (no auth)
+	registerWebhookRoutes(e, db)
+
+	// Discovery routes (if OpenAI API key configured)
+	if cfg.OpenAIAPIKey != "" {
+		registerDiscoveryRoutes(e, db, rdb, cfg, log)
+	}
+
+	// Worker pool (embedded in backend process)
+	pool := runner.NewWorkerPool(cfg, redisQueue, db, rdb, log, containerExec, ghaExec)
+	poolCtx, poolCancel := context.WithCancel(context.Background())
+	defer poolCancel()
+	pool.Start(poolCtx)
+
+	// Start GHA poller
+	pollerCtx, pollerCancel := context.WithCancel(context.Background())
+	defer pollerCancel()
+	ghaPoller.Start(pollerCtx)
 
 	// Start server
 	port := cfg.AppPort
@@ -121,6 +156,10 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Info().Msg("shutting down server...")
+
+	// Stop GHA poller and worker pool
+	ghaPoller.Shutdown()
+	pool.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()

@@ -9,6 +9,7 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/config"
 	"github.com/sujaykumarsuman/verdox/backend/internal/handler"
 	mw "github.com/sujaykumarsuman/verdox/backend/internal/middleware"
+	"github.com/sujaykumarsuman/verdox/backend/internal/queue"
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
 	"github.com/sujaykumarsuman/verdox/backend/internal/service"
 )
@@ -53,6 +54,65 @@ func registerRepositoryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg 
 	repos.GET("/:id/commits", repoHandler.ListCommits)
 	repos.POST("/:id/resync", repoHandler.Resync)
 	repos.POST("/:id/retry-clone", repoHandler.RetryClone)
+}
+
+func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger, q *queue.RedisQueue) {
+	suiteRepo := repository.NewTestSuiteRepository(db)
+	runRepo := repository.NewTestRunRepository(db)
+	resultRepo := repository.NewTestResultRepository(db)
+	repoRepo := repository.NewRepositoryRepository(db)
+	teamMemberRepo := repository.NewTeamMemberRepository(db)
+	userRepo := repository.NewUserRepository(db)
+
+	suiteService := service.NewTestSuiteService(suiteRepo, repoRepo, teamMemberRepo, log)
+	runService := service.NewTestRunService(runRepo, resultRepo, suiteRepo, repoRepo, teamMemberRepo, userRepo, q, rdb, cfg, log)
+
+	suiteHandler := handler.NewTestSuiteHandler(suiteService)
+	runHandler := handler.NewTestRunHandler(runService)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+
+	// Suite routes under /v1/repositories/:id/suites
+	repos := e.Group("/v1/repositories", authMiddleware)
+	repos.GET("/:id/suites", suiteHandler.List)
+	repos.POST("/:id/suites", suiteHandler.Create)
+	repos.POST("/:id/run-all", runHandler.RunAll)
+
+	// Suite-level routes under /v1/suites
+	suites := e.Group("/v1/suites", authMiddleware)
+	suites.PUT("/:id", suiteHandler.Update)
+	suites.DELETE("/:id", suiteHandler.Delete)
+	suites.POST("/:id/run", runHandler.Trigger)
+	suites.GET("/:id/runs", runHandler.ListBySuite)
+
+	// Run-level routes under /v1/runs
+	runs := e.Group("/v1/runs", authMiddleware)
+	runs.GET("/:id", runHandler.Get)
+	runs.GET("/:id/logs", runHandler.Logs)
+	runs.POST("/:id/cancel", runHandler.Cancel)
+}
+
+func registerWebhookRoutes(e *echo.Echo, db *sqlx.DB) {
+	runRepo := repository.NewTestRunRepository(db)
+	resultRepo := repository.NewTestResultRepository(db)
+	webhookHandler := handler.NewWebhookHandler(runRepo, resultRepo)
+
+	// No auth — run_id UUID acts as bearer token
+	webhooks := e.Group("/v1/webhooks")
+	webhooks.POST("/gha/:run_id", webhookHandler.GHACallback)
+}
+
+func registerDiscoveryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	repoRepo := repository.NewRepositoryRepository(db)
+	userRepo := repository.NewUserRepository(db)
+
+	discoveryService := service.NewDiscoveryService(repoRepo, cfg, log)
+	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	repos := e.Group("/v1/repositories", authMiddleware)
+	repos.POST("/:id/discover", discoveryHandler.Discover)
+	repos.GET("/:id/discovery", discoveryHandler.GetDiscovery)
 }
 
 func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {

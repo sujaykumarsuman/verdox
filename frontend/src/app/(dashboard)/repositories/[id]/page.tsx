@@ -18,10 +18,16 @@ import {
   GitBranch,
 } from "lucide-react";
 import { useRepository, useBranches, useCommits, resyncRepository, retryClone, deleteRepository } from "@/hooks/use-repos";
+import { useTestSuites, runAllSuites, useDiscovery } from "@/hooks/use-tests";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BranchSelector } from "@/components/repository/branch-selector";
+import { SuiteCard } from "@/components/test/suite-card";
+import { CreateSuiteDialog } from "@/components/test/create-suite-dialog";
+import { DiscoveryPanel } from "@/components/test/discovery-panel";
 import { cn } from "@/lib/utils";
+import type { DiscoverySuggestion } from "@/types/test";
 
 export default function RepositoryDetailPage({
   params,
@@ -38,6 +44,12 @@ export default function RepositoryDetailPage({
   const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showCreateSuite, setShowCreateSuite] = useState(false);
+  const [suitePrefill, setSuitePrefill] = useState<DiscoverySuggestion | undefined>();
+  const [runningAll, setRunningAll] = useState(false);
+  const { suites, isLoading: suitesLoading, refetch: refetchSuites } = useTestSuites(id);
+  const { discovery, isLoading: discovering, scan: scanForTests } = useDiscovery(id);
+  const [showDiscovery, setShowDiscovery] = useState(true);
 
   // Auto-select default branch when branches load
   const activeBranch = selectedBranch || repo?.default_branch || "";
@@ -252,22 +264,109 @@ export default function RepositoryDetailPage({
 
       {/* Test suites — primary content area */}
       <div>
-        <h3 className="text-[16px] font-semibold text-text-primary mb-3">
-          Test Suites
-        </h3>
-        <div className="rounded-[8px] border border-dashed bg-bg-secondary p-12 text-center">
-          <TestTubes className="h-10 w-10 text-text-secondary mx-auto mb-3" />
-          <h4 className="text-[15px] font-medium text-text-primary mb-1">
-            No test suites configured
-          </h4>
-          <p className="text-[14px] text-text-secondary mb-4">
-            Create your first test suite to start running tests against this repository.
-          </p>
-          <Button disabled>
-            Create Suite (Phase 3)
-          </Button>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[16px] font-semibold text-text-primary">
+            Test Suites
+          </h3>
+          <div className="flex items-center gap-2">
+            {isCloneReady && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={scanForTests}
+                loading={discovering}
+              >
+                Scan for Tests
+              </Button>
+            )}
+            {suites.length > 0 && isCloneReady && latestCommit && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  setRunningAll(true);
+                  try {
+                    await runAllSuites(id, activeBranch, latestCommit.sha);
+                    refetchSuites();
+                  } catch {}
+                  setRunningAll(false);
+                }}
+                loading={runningAll}
+              >
+                Run All
+              </Button>
+            )}
+            {isCloneReady && (
+              <Button size="sm" onClick={() => setShowCreateSuite(true)}>
+                Create Suite
+              </Button>
+            )}
+          </div>
         </div>
+
+        {/* AI Discovery results */}
+        {discovery && showDiscovery && discovery.suggestions.length > 0 && (
+          <DiscoveryPanel
+            suggestions={discovery.suggestions}
+            onApply={(suggestion) => {
+              setSuitePrefill(suggestion);
+              setShowCreateSuite(true);
+            }}
+            onDismiss={() => setShowDiscovery(false)}
+          />
+        )}
+
+        {suitesLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[1, 2].map((n) => (
+              <Card key={n}>
+                <CardBody>
+                  <Skeleton width="60%" height="20px" />
+                  <Skeleton width="40%" height="16px" />
+                  <Skeleton width="80%" height="16px" />
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+        ) : suites.length === 0 ? (
+          <div className="rounded-[8px] border border-dashed bg-bg-secondary p-12 text-center">
+            <TestTubes className="h-10 w-10 text-text-secondary mx-auto mb-3" />
+            <h4 className="text-[15px] font-medium text-text-primary mb-1">
+              No test suites configured
+            </h4>
+            <p className="text-[14px] text-text-secondary mb-4">
+              Create your first test suite to start running tests against this repository.
+            </p>
+            {isCloneReady && (
+              <Button onClick={() => setShowCreateSuite(true)}>
+                Create Suite
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {suites.map((suite) => (
+              <SuiteCard
+                key={suite.id}
+                suite={suite}
+                repoId={id}
+                branch={activeBranch}
+                commitHash={latestCommit?.sha || ""}
+                onRunTriggered={refetchSuites}
+                onDeleted={refetchSuites}
+              />
+            ))}
+          </div>
+        )}
       </div>
+
+      <CreateSuiteDialog
+        repoId={id}
+        open={showCreateSuite}
+        onClose={() => { setShowCreateSuite(false); setSuitePrefill(undefined); }}
+        onSuccess={refetchSuites}
+        prefill={suitePrefill}
+      />
     </div>
   );
 }

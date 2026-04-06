@@ -35,6 +35,13 @@ type Config struct {
 	RepoBasePath string `mapstructure:"VERDOX_REPO_BASE_PATH"`
 
 	GithubTokenEncryptionKey string `mapstructure:"GITHUB_TOKEN_ENCRYPTION_KEY"`
+
+	RunnerMaxConcurrent int    `mapstructure:"RUNNER_MAX_CONCURRENT"`
+	RunnerMaxTimeout    int    `mapstructure:"RUNNER_MAX_TIMEOUT"`
+	RunnerDefaultImage  string `mapstructure:"RUNNER_DEFAULT_IMAGE"`
+
+	OpenAIAPIKey   string `mapstructure:"VERDOX_OPENAI_API_KEY"`
+	WebhookBaseURL string `mapstructure:"VERDOX_WEBHOOK_BASE_URL"`
 }
 
 func (c *Config) CORSOriginsList() []string {
@@ -64,6 +71,9 @@ func Load() (*Config, error) {
 	viper.SetDefault("LOG_LEVEL", "info")
 	viper.SetDefault("FRONTEND_URL", "http://localhost:3000")
 	viper.SetDefault("VERDOX_REPO_BASE_PATH", "./data/repositories")
+	viper.SetDefault("RUNNER_MAX_CONCURRENT", 5)
+	viper.SetDefault("RUNNER_MAX_TIMEOUT", 1800)
+	viper.SetDefault("RUNNER_DEFAULT_IMAGE", "alpine:3.21")
 
 	// Explicitly bind all config keys so AutomaticEnv picks up env vars
 	for _, key := range []string{
@@ -77,6 +87,8 @@ func Load() (*Config, error) {
 		"LOG_LEVEL",
 		"VERDOX_REPO_BASE_PATH",
 		"GITHUB_TOKEN_ENCRYPTION_KEY",
+		"RUNNER_MAX_CONCURRENT", "RUNNER_MAX_TIMEOUT", "RUNNER_DEFAULT_IMAGE",
+		"VERDOX_OPENAI_API_KEY", "VERDOX_WEBHOOK_BASE_URL",
 	} {
 		_ = viper.BindEnv(key)
 	}
