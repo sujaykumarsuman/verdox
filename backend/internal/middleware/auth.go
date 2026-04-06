@@ -69,6 +69,20 @@ func Auth(jwtSecret string, userRepo repository.UserRepository, rdb *redis.Clien
 				}
 			}
 
+			// Check if user account is banned or deactivated
+			user, err := userRepo.GetByID(ctx, userID)
+			if err != nil {
+				return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not found")
+			}
+			if user.IsBanned {
+				clearAuthCookies(c)
+				return response.Error(c, http.StatusForbidden, "ACCOUNT_BANNED", "Account has been banned")
+			}
+			if !user.IsActive {
+				clearAuthCookies(c)
+				return response.Error(c, http.StatusUnauthorized, "ACCOUNT_DEACTIVATED", "Account has been deactivated")
+			}
+
 			// Set context values
 			c.Set(string(ContextKeyUserID), userID)
 			c.Set(string(ContextKeyUsername), claims.Username)
@@ -91,4 +105,25 @@ func GetUserRole(c echo.Context) string {
 		return role
 	}
 	return ""
+}
+
+// clearAuthCookies expires both auth cookies so the browser removes them.
+// This ensures banned/deactivated users don't retain stale sessions.
+func clearAuthCookies(c echo.Context) {
+	c.SetCookie(&http.Cookie{
+		Name:     "verdox_access",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+	c.SetCookie(&http.Cookie{
+		Name:     "verdox_refresh",
+		Value:    "",
+		Path:     "/api/v1/auth",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
 }

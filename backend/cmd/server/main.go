@@ -111,6 +111,10 @@ func main() {
 	var ghaExec *runner.GHAExecutor
 	ghaExec = runner.NewGHAExecutor(cfg, log, ghaPoller.Register)
 
+	// User settings & Admin routes
+	registerUserRoutes(e, db, rdb, cfg, log)
+	registerAdminRoutes(e, db, rdb, cfg, log)
+
 	// Team & Repository routes
 	registerTeamRoutes(e, db, rdb, cfg, log)
 	registerRepositoryRoutes(e, db, rdb, cfg, log, cloneCh)

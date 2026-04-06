@@ -25,7 +25,6 @@ export function LoginForm() {
     e.preventDefault();
     setErrors({});
 
-    // Client-side validation
     const newErrors: Record<string, string> = {};
     if (!login) newErrors.login = "Email or username is required";
     if (!password) newErrors.password = "Password is required";
@@ -41,8 +40,24 @@ export function LoginForm() {
       router.push(returnTo);
     } catch (err) {
       if (err instanceof ApiRequestError) {
-        if (err.details) {
-          setErrors(err.details);
+        if (err.code === "ACCOUNT_BANNED") {
+          // Store ban info + credentials for the /banned page
+          try {
+            sessionStorage.setItem("verdox_ban_info", JSON.stringify({
+              reason: (err.details?.ban_reason as string) || "",
+              hasPendingReview: (err.details?.has_pending_review as boolean) || false,
+              reviewsRemaining: (err.details?.reviews_remaining as number) ?? 0,
+              login,
+              password,
+            }));
+          } catch {}
+          router.push("/banned");
+          return;
+        }
+        if (err.code === "ACCOUNT_DEACTIVATED") {
+          toast.error(err.message);
+        } else if (err.details) {
+          setErrors(err.details as Record<string, string>);
         } else {
           toast.error(err.message);
         }

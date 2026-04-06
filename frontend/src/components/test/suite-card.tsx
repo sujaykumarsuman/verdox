@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Play, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,9 +37,10 @@ export function SuiteCard({
     setDeleting(true);
     try {
       await deleteTestSuite(suite.id);
+      toast.success("Test suite deleted");
       onDeleted();
-    } catch {
-      // Error handled silently; user can retry
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete suite");
     } finally {
       setDeleting(false);
       setConfirmDelete(false);
@@ -50,9 +52,10 @@ export function SuiteCard({
     setTriggering(true);
     try {
       await triggerRun(suite.id, branch, commitHash);
+      toast.success("Test run triggered");
       onRunTriggered();
-    } catch {
-      // Error handled silently; user can retry
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to trigger run");
     } finally {
       setTriggering(false);
     }

@@ -1,4 +1,4 @@
-export type UserRole = "root" | "moderator" | "user";
+export type UserRole = "root" | "admin" | "moderator" | "user";
 
 export interface User {
   id: string;
@@ -6,6 +6,9 @@ export interface User {
   email: string;
   role: UserRole;
   avatar_url: string | null;
+  is_active: boolean;
+  is_banned: boolean;
+  ban_reason: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -1,8 +1,10 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
-import { api } from "./api";
+import { api, ApiRequestError } from "./api";
 import type { User } from "@/types/user";
+
+const PUBLIC_PATHS = ["/", "/login", "/signup", "/forgot-password", "/reset-password", "/banned"];
 
 interface AuthContextType {
   user: User | null;
@@ -11,6 +13,7 @@ interface AuthContextType {
   login: (login: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -29,11 +32,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const init = async () => {
       try {
         await api("/v1/auth/refresh", { method: "POST" });
-        // Refresh succeeded — fetch user info
         const data = await api<User>("/v1/auth/me");
         setUser(data);
-      } catch {
-        // No valid session
+      } catch (err) {
+        // No valid session — redirect to appropriate page if on a protected route
+        setUser(null);
+        if (typeof window !== "undefined") {
+          const path = window.location.pathname;
+          const isPublic = PUBLIC_PATHS.some((p) => path === p);
+          if (!isPublic) {
+            // Check if banned — redirect to /banned page
+            if (err instanceof ApiRequestError && err.code === "ACCOUNT_BANNED") {
+              window.location.replace("/banned");
+            } else {
+              window.location.replace("/login");
+            }
+            return;
+          }
+        }
       } finally {
         setIsLoading(false);
       }
@@ -57,6 +73,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const data = await api<User>("/v1/auth/me");
+      setUser(data);
+    } catch {
+      // Ignore errors
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api("/v1/auth/logout", { method: "POST" });
@@ -75,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         signup,
         logout,
+        refreshUser,
       }}
     >
       {children}

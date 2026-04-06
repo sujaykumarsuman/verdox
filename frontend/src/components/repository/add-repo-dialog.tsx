@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { addRepository } from "@/hooks/use-repos";
@@ -29,10 +30,13 @@ export function AddRepoDialog({ teamId, open, onClose, onSuccess }: AddRepoDialo
     try {
       await addRepository(url.trim(), teamId);
       setUrl("");
+      toast.success("Repository added — cloning in background");
       onSuccess();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add repository");
+      const msg = err instanceof Error ? err.message : "Failed to add repository";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

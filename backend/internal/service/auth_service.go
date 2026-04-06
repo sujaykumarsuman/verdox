@@ -21,37 +21,53 @@ import (
 )
 
 var (
-	ErrEmailTaken          = errors.New("email already in use")
-	ErrUsernameTaken       = errors.New("username already in use")
-	ErrInvalidCredentials  = errors.New("invalid email/username or password")
-	ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
-	ErrInvalidResetToken   = errors.New("invalid or expired reset token")
+	ErrEmailTaken             = errors.New("email already in use")
+	ErrUsernameTaken          = errors.New("username already in use")
+	ErrInvalidCredentials     = errors.New("invalid email/username or password")
+	ErrInvalidRefreshToken    = errors.New("invalid or expired refresh token")
+	ErrInvalidResetToken      = errors.New("invalid or expired reset token")
+	ErrInvalidCurrentPassword = errors.New("current password is incorrect")
+	ErrAccountBanned          = errors.New("account has been banned")
+	ErrAccountDeactivated     = errors.New("account has been deactivated")
+	ErrNotBanned              = errors.New("account is not banned")
+	ErrReviewAlreadyPending   = errors.New("a review request is already pending")
+	ErrReviewLimitReached     = errors.New("maximum review attempts reached")
 )
 
+// BannedUserInfo carries ban details for the login error response.
+type BannedUserInfo struct {
+	BanReason        string `json:"ban_reason"`
+	HasPendingReview bool   `json:"has_pending_review"`
+	ReviewsRemaining int    `json:"reviews_remaining"`
+}
+
 type AuthService struct {
-	userRepo    repository.UserRepository
-	sessionRepo repository.SessionRepository
-	resetRepo   repository.PasswordResetRepository
-	rdb         *redis.Client
-	cfg         *config.Config
-	log         zerolog.Logger
+	userRepo      repository.UserRepository
+	sessionRepo   repository.SessionRepository
+	resetRepo     repository.PasswordResetRepository
+	banReviewRepo repository.BanReviewRepository
+	rdb           *redis.Client
+	cfg           *config.Config
+	log           zerolog.Logger
 }
 
 func NewAuthService(
 	userRepo repository.UserRepository,
 	sessionRepo repository.SessionRepository,
 	resetRepo repository.PasswordResetRepository,
+	banReviewRepo repository.BanReviewRepository,
 	rdb *redis.Client,
 	cfg *config.Config,
 	log zerolog.Logger,
 ) *AuthService {
 	return &AuthService{
-		userRepo:    userRepo,
-		sessionRepo: sessionRepo,
-		resetRepo:   resetRepo,
-		rdb:         rdb,
-		cfg:         cfg,
-		log:         log,
+		userRepo:      userRepo,
+		sessionRepo:   sessionRepo,
+		resetRepo:     resetRepo,
+		banReviewRepo: banReviewRepo,
+		rdb:           rdb,
+		cfg:           cfg,
+		log:           log,
 	}
 }
 
@@ -106,6 +122,13 @@ func (s *AuthService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Au
 
 	if err := hash.CheckPassword(req.Password, user.PasswordHash); err != nil {
 		return nil, "", ErrInvalidCredentials
+	}
+
+	if user.IsBanned {
+		return nil, "", ErrAccountBanned
+	}
+	if !user.IsActive {
+		return nil, "", ErrAccountDeactivated
 	}
 
 	accessToken, refreshToken, err := s.createSession(ctx, user)
@@ -235,6 +258,64 @@ func (s *AuthService) ResetPassword(ctx context.Context, req *dto.ResetPasswordR
 	return nil
 }
 
+func (s *AuthService) UpdateProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateProfileRequest) (*model.User, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	if req.Username != nil && *req.Username != user.Username {
+		if existing, err := s.userRepo.GetByUsername(ctx, *req.Username); err == nil && existing.ID != userID {
+			return nil, ErrUsernameTaken
+		}
+		user.Username = *req.Username
+	}
+
+	if req.Email != nil && *req.Email != user.Email {
+		if existing, err := s.userRepo.GetByEmail(ctx, *req.Email); err == nil && existing.ID != userID {
+			return nil, ErrEmailTaken
+		}
+		user.Email = *req.Email
+	}
+
+	if req.AvatarURL != nil {
+		user.AvatarURL = req.AvatarURL
+	}
+
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	return user, nil
+}
+
+func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, req *dto.ChangePasswordRequest) error {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
+	if err := hash.CheckPassword(req.CurrentPassword, user.PasswordHash); err != nil {
+		return ErrInvalidCurrentPassword
+	}
+
+	passwordHash, err := hash.HashPassword(req.NewPassword, s.cfg.BcryptCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	user.PasswordHash = passwordHash
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+
+	// Invalidate all sessions
+	_ = s.sessionRepo.DeleteByUserID(ctx, userID)
+	s.rdb.Del(ctx, fmt.Sprintf("session:%s", userID.String()))
+
+	return nil
+}
+
 func (s *AuthService) createSession(ctx context.Context, user *model.User) (string, string, error) {
 	accessToken, err := jwt.GenerateAccessToken(
 		s.cfg.JWTSecret,
@@ -274,4 +355,88 @@ func (s *AuthService) createSession(ctx context.Context, user *model.User) (stri
 	)
 
 	return accessToken, refreshToken, nil
+}
+
+func (s *AuthService) GetBannedUserInfo(ctx context.Context, login string) (*BannedUserInfo, error) {
+	user, err := s.userRepo.GetByLogin(ctx, login)
+	if err != nil {
+		return nil, err
+	}
+
+	reason := ""
+	if user.BanReason != nil {
+		reason = *user.BanReason
+	}
+
+	hasPending, _ := s.banReviewRepo.HasPendingForUser(ctx, user.ID)
+	totalReviews, _ := s.banReviewRepo.CountByUser(ctx, user.ID)
+	remaining := 3 - totalReviews
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	return &BannedUserInfo{
+		BanReason:        reason,
+		HasPendingReview: hasPending,
+		ReviewsRemaining: remaining,
+	}, nil
+}
+
+func (s *AuthService) RequestBanReview(ctx context.Context, req *dto.BanReviewRequest) error {
+	// Authenticate the banned user
+	user, err := s.userRepo.GetByLogin(ctx, req.Login)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrInvalidCredentials
+		}
+		return err
+	}
+
+	if err := hash.CheckPassword(req.Password, user.PasswordHash); err != nil {
+		return ErrInvalidCredentials
+	}
+
+	if !user.IsBanned {
+		return ErrNotBanned
+	}
+
+	// Check for existing pending review
+	hasPending, err := s.banReviewRepo.HasPendingForUser(ctx, user.ID)
+	if err != nil {
+		return fmt.Errorf("check pending review: %w", err)
+	}
+	if hasPending {
+		return ErrReviewAlreadyPending
+	}
+
+	// Max 3 review attempts per user
+	totalReviews, err := s.banReviewRepo.CountByUser(ctx, user.ID)
+	if err != nil {
+		return fmt.Errorf("count reviews: %w", err)
+	}
+	if totalReviews >= 3 {
+		return ErrReviewLimitReached
+	}
+
+	// Create the review request
+	banReason := ""
+	if user.BanReason != nil {
+		banReason = *user.BanReason
+	}
+
+	review := &model.BanReview{
+		UserID:        user.ID,
+		BanReason:     banReason,
+		Clarification: req.Clarification,
+	}
+	if err := s.banReviewRepo.Create(ctx, review); err != nil {
+		return fmt.Errorf("create ban review: %w", err)
+	}
+
+	s.log.Info().
+		Str("user_id", user.ID.String()).
+		Str("review_id", review.ID.String()).
+		Msg("ban review request submitted")
+
+	return nil
 }

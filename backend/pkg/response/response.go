@@ -31,6 +31,16 @@ func Error(c echo.Context, status int, code string, message string) error {
 	})
 }
 
+func ErrorWithData(c echo.Context, status int, code string, message string, data interface{}) error {
+	return c.JSON(status, errorEnvelope{
+		Error: errorBody{
+			Code:    code,
+			Message: message,
+			Details: data,
+		},
+	})
+}
+
 func ValidationError(c echo.Context, details interface{}) error {
 	return c.JSON(400, errorEnvelope{
 		Error: errorBody{

@@ -14,7 +14,10 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-const adminItem = { href: "/admin", label: "Admin", icon: Shield };
+const adminItems = {
+  full: { href: "/admin", label: "Admin", icon: Shield },
+  mod: { href: "/admin", label: "Mod Panel", icon: Shield },
+};
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -24,6 +27,13 @@ export function Sidebar() {
   useEffect(() => {
     const saved = localStorage.getItem("verdox-sidebar-collapsed");
     if (saved === "true") setCollapsed(true);
+
+    // Auto-collapse on mobile
+    const mq = window.matchMedia("(max-width: 767px)");
+    if (mq.matches) setCollapsed(true);
+    const handler = (e: MediaQueryListEvent) => setCollapsed(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
   }, []);
 
   const toggle = () => {
@@ -32,7 +42,8 @@ export function Sidebar() {
     localStorage.setItem("verdox-sidebar-collapsed", String(next));
   };
 
-  const isAdmin = user?.role === "root" || user?.role === "moderator";
+  const isAdmin = user?.role === "root" || user?.role === "admin" || user?.role === "moderator";
+  const adminItem = user?.role === "moderator" ? adminItems.mod : adminItems.full;
   const items = isAdmin ? [...navItems, adminItem] : navItems;
 
   return (

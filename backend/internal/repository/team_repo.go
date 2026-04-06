@@ -31,6 +31,7 @@ type TeamRepository interface {
 	ListDiscoverable(ctx context.Context, userID uuid.UUID) ([]DiscoverableTeam, error)
 	UpdatePAT(ctx context.Context, teamID uuid.UUID, encrypted string, nonce []byte, setBy uuid.UUID, githubUsername string) error
 	ClearPAT(ctx context.Context, teamID uuid.UUID) error
+	ListAll(ctx context.Context) ([]model.Team, error)
 }
 
 type teamRepo struct {
@@ -122,4 +123,11 @@ func (r *teamRepo) ClearPAT(ctx context.Context, teamID uuid.UUID) error {
 		WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, teamID)
 	return err
+}
+
+func (r *teamRepo) ListAll(ctx context.Context) ([]model.Team, error) {
+	var teams []model.Team
+	err := r.db.SelectContext(ctx, &teams,
+		"SELECT * FROM teams WHERE deleted_at IS NULL ORDER BY name")
+	return teams, err
 }
