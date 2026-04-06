@@ -48,10 +48,20 @@ func (s *TestSuiteService) CreateSuite(ctx context.Context, userID, repoID uuid.
 		timeout = *req.TimeoutSeconds
 	}
 
+	execMode := model.ExecutionModeContainer
+	if req.ExecutionMode != "" {
+		execMode = req.ExecutionMode
+	}
+
 	suite := &model.TestSuite{
 		RepositoryID:   repoID,
 		Name:           req.Name,
-		Type:           model.TestType(req.Type),
+		Type:           req.Type,
+		ExecutionMode:  execMode,
+		DockerImage:    req.DockerImage,
+		TestCommand:    req.TestCommand,
+		GHAWorkflowID:  req.GHAWorkflowID,
+		EnvVars:        model.EnvVarsMap(req.EnvVars),
 		ConfigPath:     req.ConfigPath,
 		TimeoutSeconds: timeout,
 	}
@@ -98,7 +108,22 @@ func (s *TestSuiteService) UpdateSuite(ctx context.Context, userID, suiteID uuid
 		suite.Name = *req.Name
 	}
 	if req.Type != nil {
-		suite.Type = model.TestType(*req.Type)
+		suite.Type = *req.Type
+	}
+	if req.ExecutionMode != nil {
+		suite.ExecutionMode = *req.ExecutionMode
+	}
+	if req.DockerImage != nil {
+		suite.DockerImage = req.DockerImage
+	}
+	if req.TestCommand != nil {
+		suite.TestCommand = req.TestCommand
+	}
+	if req.GHAWorkflowID != nil {
+		suite.GHAWorkflowID = req.GHAWorkflowID
+	}
+	if req.EnvVars != nil {
+		suite.EnvVars = model.EnvVarsMap(req.EnvVars)
 	}
 	if req.ConfigPath != nil {
 		suite.ConfigPath = req.ConfigPath

@@ -30,5 +30,7 @@ type TestRun struct {
 	Status      TestRunStatus `db:"status" json:"status"`
 	StartedAt   *time.Time    `db:"started_at" json:"started_at"`
 	FinishedAt  *time.Time    `db:"finished_at" json:"finished_at"`
+	GHARunID    *int64        `db:"gha_run_id" json:"gha_run_id,omitempty"`
+	LogOutput   *string       `db:"log_output" json:"log_output,omitempty"`
 	CreatedAt   time.Time     `db:"created_at" json:"created_at"`
 }

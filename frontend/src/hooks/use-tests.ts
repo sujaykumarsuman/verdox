@@ -8,6 +8,7 @@ import type {
   TestRunDetail,
   TestRunListResponse,
   RunLogsResponse,
+  DiscoveryResponse,
 } from "@/types/test";
 import type { PaginationMeta } from "@/types/repository";
 
@@ -48,6 +49,11 @@ export async function createTestSuite(
   data: {
     name: string;
     type: string;
+    execution_mode?: string;
+    docker_image?: string;
+    test_command?: string;
+    gha_workflow_id?: string;
+    env_vars?: Record<string, string>;
     config_path?: string;
     timeout_seconds?: number;
   }
@@ -233,4 +239,38 @@ export async function runAllSuites(
     method: "POST",
     body: JSON.stringify({ branch, commit_hash: commitHash }),
   });
+}
+
+// --- Discovery ---
+
+export async function discoverTests(
+  repoId: string
+): Promise<DiscoveryResponse> {
+  return api<DiscoveryResponse>(`/v1/repositories/${repoId}/discover`, {
+    method: "POST",
+  });
+}
+
+export function useDiscovery(repoId: string) {
+  const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const scan = useCallback(async () => {
+    if (!repoId) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await discoverTests(repoId);
+      setDiscovery(data);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Discovery failed"
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [repoId]);
+
+  return { discovery, isLoading, error, scan };
 }

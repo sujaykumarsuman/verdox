@@ -18,14 +18,16 @@ import {
   GitBranch,
 } from "lucide-react";
 import { useRepository, useBranches, useCommits, resyncRepository, retryClone, deleteRepository } from "@/hooks/use-repos";
-import { useTestSuites, runAllSuites } from "@/hooks/use-tests";
+import { useTestSuites, runAllSuites, useDiscovery } from "@/hooks/use-tests";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BranchSelector } from "@/components/repository/branch-selector";
 import { SuiteCard } from "@/components/test/suite-card";
 import { CreateSuiteDialog } from "@/components/test/create-suite-dialog";
+import { DiscoveryPanel } from "@/components/test/discovery-panel";
 import { cn } from "@/lib/utils";
+import type { DiscoverySuggestion } from "@/types/test";
 
 export default function RepositoryDetailPage({
   params,
@@ -43,8 +45,11 @@ export default function RepositoryDetailPage({
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showCreateSuite, setShowCreateSuite] = useState(false);
+  const [suitePrefill, setSuitePrefill] = useState<DiscoverySuggestion | undefined>();
   const [runningAll, setRunningAll] = useState(false);
   const { suites, isLoading: suitesLoading, refetch: refetchSuites } = useTestSuites(id);
+  const { discovery, isLoading: discovering, scan: scanForTests } = useDiscovery(id);
+  const [showDiscovery, setShowDiscovery] = useState(true);
 
   // Auto-select default branch when branches load
   const activeBranch = selectedBranch || repo?.default_branch || "";
@@ -264,6 +269,16 @@ export default function RepositoryDetailPage({
             Test Suites
           </h3>
           <div className="flex items-center gap-2">
+            {isCloneReady && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={scanForTests}
+                loading={discovering}
+              >
+                Scan for Tests
+              </Button>
+            )}
             {suites.length > 0 && isCloneReady && latestCommit && (
               <Button
                 variant="secondary"
@@ -288,6 +303,18 @@ export default function RepositoryDetailPage({
             )}
           </div>
         </div>
+
+        {/* AI Discovery results */}
+        {discovery && showDiscovery && discovery.suggestions.length > 0 && (
+          <DiscoveryPanel
+            suggestions={discovery.suggestions}
+            onApply={(suggestion) => {
+              setSuitePrefill(suggestion);
+              setShowCreateSuite(true);
+            }}
+            onDismiss={() => setShowDiscovery(false)}
+          />
+        )}
 
         {suitesLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -335,8 +362,9 @@ export default function RepositoryDetailPage({
       <CreateSuiteDialog
         repoId={id}
         open={showCreateSuite}
-        onClose={() => setShowCreateSuite(false)}
+        onClose={() => { setShowCreateSuite(false); setSuitePrefill(undefined); }}
         onSuccess={refetchSuites}
+        prefill={suitePrefill}
       />
     </div>
   );

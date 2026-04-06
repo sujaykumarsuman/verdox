@@ -27,11 +27,13 @@ func NewTestSuiteRepository(db *sqlx.DB) TestSuiteRepository {
 }
 
 func (r *testSuiteRepo) Create(ctx context.Context, suite *model.TestSuite) error {
-	query := `INSERT INTO test_suites (repository_id, name, type, config_path, timeout_seconds)
-		VALUES ($1, $2, $3, $4, $5)
+	query := `INSERT INTO test_suites (repository_id, name, type, execution_mode, docker_image, test_command, gha_workflow_id, env_vars, config_path, timeout_seconds)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at, updated_at`
 	return r.db.QueryRowxContext(ctx, query,
-		suite.RepositoryID, suite.Name, suite.Type, suite.ConfigPath, suite.TimeoutSeconds,
+		suite.RepositoryID, suite.Name, suite.Type, suite.ExecutionMode,
+		suite.DockerImage, suite.TestCommand, suite.GHAWorkflowID, suite.EnvVars,
+		suite.ConfigPath, suite.TimeoutSeconds,
 	).Scan(&suite.ID, &suite.CreatedAt, &suite.UpdatedAt)
 }
 
@@ -55,10 +57,12 @@ func (r *testSuiteRepo) ListByRepositoryID(ctx context.Context, repoID uuid.UUID
 }
 
 func (r *testSuiteRepo) Update(ctx context.Context, suite *model.TestSuite) error {
-	query := `UPDATE test_suites SET name = $1, type = $2, config_path = $3, timeout_seconds = $4, updated_at = now()
-		WHERE id = $5`
+	query := `UPDATE test_suites SET name = $1, type = $2, execution_mode = $3, docker_image = $4, test_command = $5,
+		gha_workflow_id = $6, env_vars = $7, config_path = $8, timeout_seconds = $9, updated_at = now()
+		WHERE id = $10`
 	_, err := r.db.ExecContext(ctx, query,
-		suite.Name, suite.Type, suite.ConfigPath, suite.TimeoutSeconds, suite.ID)
+		suite.Name, suite.Type, suite.ExecutionMode, suite.DockerImage, suite.TestCommand,
+		suite.GHAWorkflowID, suite.EnvVars, suite.ConfigPath, suite.TimeoutSeconds, suite.ID)
 	return err
 }
 

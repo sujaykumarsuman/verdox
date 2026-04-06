@@ -1,6 +1,6 @@
 import type { PaginationMeta } from "@/types/repository";
 
-export type TestType = "unit" | "integration";
+export type ExecutionMode = "container" | "gha";
 export type TestRunStatus = "queued" | "running" | "passed" | "failed" | "cancelled";
 export type TestResultStatus = "pass" | "fail" | "skip" | "error";
 
@@ -8,7 +8,12 @@ export interface TestSuite {
   id: string;
   repository_id: string;
   name: string;
-  type: TestType;
+  type: string;
+  execution_mode: ExecutionMode;
+  docker_image: string | null;
+  test_command: string | null;
+  gha_workflow_id: string | null;
+  env_vars: Record<string, string>;
   config_path: string | null;
   timeout_seconds: number;
   created_at: string;
@@ -26,6 +31,8 @@ export interface TestRun {
   status: TestRunStatus;
   started_at: string | null;
   finished_at: string | null;
+  gha_run_id?: number;
+  gha_run_url?: string;
   created_at: string;
 }
 
@@ -50,8 +57,10 @@ export interface RunSummary {
 export interface TestRunDetail extends TestRun {
   suite_name: string;
   suite_type: string;
+  execution_mode: ExecutionMode;
   repository_id: string;
   repository_name: string;
+  log_output?: string;
   summary: RunSummary | null;
   results: TestResult[];
 }
@@ -71,4 +80,21 @@ export interface RunLogEntry {
 export interface RunLogsResponse {
   run_id: string;
   logs: RunLogEntry[];
+}
+
+export interface DiscoverySuggestion {
+  name: string;
+  type: string;
+  execution_mode: ExecutionMode;
+  docker_image?: string;
+  test_command?: string;
+  gha_workflow?: string;
+  confidence: number;
+  reasoning: string;
+}
+
+export interface DiscoveryResponse {
+  repository_id: string;
+  suggestions: DiscoverySuggestion[];
+  scanned_at: string;
 }

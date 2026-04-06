@@ -128,6 +128,16 @@ export default function TestRunDetailPage({
             <span className="text-[13px] text-text-secondary">
               {formatDate(run.created_at)}
             </span>
+            {run.gha_run_url && (
+              <a
+                href={run.gha_run_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[13px] text-accent hover:underline"
+              >
+                View on GitHub
+              </a>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">

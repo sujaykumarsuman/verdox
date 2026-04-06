@@ -21,6 +21,10 @@ type TestRunRepository interface {
 	NextRunNumber(ctx context.Context, suiteID uuid.UUID) (int, error)
 	FindTerminalRun(ctx context.Context, suiteID uuid.UUID, branch, commitHash string) (*model.TestRun, error)
 	GetLatestBySuiteID(ctx context.Context, suiteID uuid.UUID) (*model.TestRun, error)
+	UpdateGHARunID(ctx context.Context, id uuid.UUID, ghaRunID int64) error
+	FindByGHARunID(ctx context.Context, ghaRunID int64) (*model.TestRun, error)
+	UpdateLogOutput(ctx context.Context, id uuid.UUID, logOutput string) error
+	ListActiveGHARuns(ctx context.Context) ([]model.TestRun, error)
 }
 
 type testRunRepo struct {
@@ -142,4 +146,36 @@ func (r *testRunRepo) GetLatestBySuiteID(ctx context.Context, suiteID uuid.UUID)
 		return nil, err
 	}
 	return &run, nil
+}
+
+func (r *testRunRepo) UpdateGHARunID(ctx context.Context, id uuid.UUID, ghaRunID int64) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE test_runs SET gha_run_id = $1 WHERE id = $2", ghaRunID, id)
+	return err
+}
+
+func (r *testRunRepo) FindByGHARunID(ctx context.Context, ghaRunID int64) (*model.TestRun, error) {
+	var run model.TestRun
+	err := r.db.GetContext(ctx, &run,
+		"SELECT * FROM test_runs WHERE gha_run_id = $1", ghaRunID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &run, err
+}
+
+func (r *testRunRepo) UpdateLogOutput(ctx context.Context, id uuid.UUID, logOutput string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE test_runs SET log_output = $1 WHERE id = $2", logOutput, id)
+	return err
+}
+
+func (r *testRunRepo) ListActiveGHARuns(ctx context.Context) ([]model.TestRun, error) {
+	var runs []model.TestRun
+	err := r.db.SelectContext(ctx, &runs,
+		"SELECT * FROM test_runs WHERE gha_run_id IS NOT NULL AND status IN ('queued', 'running') ORDER BY created_at")
+	if err != nil {
+		return nil, err
+	}
+	return runs, nil
 }

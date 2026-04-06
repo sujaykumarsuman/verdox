@@ -39,6 +39,9 @@ type Config struct {
 	RunnerMaxConcurrent int    `mapstructure:"RUNNER_MAX_CONCURRENT"`
 	RunnerMaxTimeout    int    `mapstructure:"RUNNER_MAX_TIMEOUT"`
 	RunnerDefaultImage  string `mapstructure:"RUNNER_DEFAULT_IMAGE"`
+
+	OpenAIAPIKey   string `mapstructure:"VERDOX_OPENAI_API_KEY"`
+	WebhookBaseURL string `mapstructure:"VERDOX_WEBHOOK_BASE_URL"`
 }
 
 func (c *Config) CORSOriginsList() []string {
@@ -85,6 +88,7 @@ func Load() (*Config, error) {
 		"VERDOX_REPO_BASE_PATH",
 		"GITHUB_TOKEN_ENCRYPTION_KEY",
 		"RUNNER_MAX_CONCURRENT", "RUNNER_MAX_TIMEOUT", "RUNNER_DEFAULT_IMAGE",
+		"VERDOX_OPENAI_API_KEY", "VERDOX_WEBHOOK_BASE_URL",
 	} {
 		_ = viper.BindEnv(key)
 	}

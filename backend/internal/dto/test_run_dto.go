@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/sujaykumarsuman/verdox/backend/internal/model"
@@ -31,6 +32,8 @@ type TestRunResponse struct {
 	Status              string  `json:"status"`
 	StartedAt           *string `json:"started_at"`
 	FinishedAt          *string `json:"finished_at"`
+	GHARunID            *int64  `json:"gha_run_id,omitempty"`
+	GHARunURL           *string `json:"gha_run_url,omitempty"`
 	CreatedAt           string  `json:"created_at"`
 }
 
@@ -38,8 +41,10 @@ type TestRunDetailResponse struct {
 	TestRunResponse
 	SuiteName      string               `json:"suite_name"`
 	SuiteType      string               `json:"suite_type"`
+	ExecutionMode  string               `json:"execution_mode"`
 	RepositoryID   string               `json:"repository_id"`
 	RepositoryName string               `json:"repository_name"`
+	LogOutput      *string              `json:"log_output,omitempty"`
 	Summary        *RunSummary          `json:"summary"`
 	Results        []TestResultResponse `json:"results"`
 }
@@ -100,6 +105,7 @@ func NewTestRunResponse(run *model.TestRun) TestRunResponse {
 		Branch:      run.Branch,
 		CommitHash:  run.CommitHash,
 		Status:      string(run.Status),
+		GHARunID:    run.GHARunID,
 		CreatedAt:   run.CreatedAt.Format(time.RFC3339),
 	}
 	if run.TriggeredBy != nil {
@@ -113,6 +119,16 @@ func NewTestRunResponse(run *model.TestRun) TestRunResponse {
 	if run.FinishedAt != nil {
 		s := run.FinishedAt.Format(time.RFC3339)
 		resp.FinishedAt = &s
+	}
+	return resp
+}
+
+// NewTestRunResponseWithGHA adds the GHA run URL computed from repo full name.
+func NewTestRunResponseWithGHA(run *model.TestRun, repoFullName string) TestRunResponse {
+	resp := NewTestRunResponse(run)
+	if run.GHARunID != nil && repoFullName != "" {
+		url := fmt.Sprintf("https://github.com/%s/actions/runs/%d", repoFullName, *run.GHARunID)
+		resp.GHARunURL = &url
 	}
 	return resp
 }

@@ -47,9 +47,12 @@ export function SuiteCard({
         <div className="flex items-start justify-between mb-3">
           <div>
             <h4 className="font-semibold text-text-primary">{suite.name}</h4>
-            <Badge variant="neutral" className="mt-1">
-              {suite.type === "unit" ? "Unit" : "Integration"}
-            </Badge>
+            <div className="flex items-center gap-1.5 mt-1">
+              <Badge variant="neutral">{suite.type}</Badge>
+              <Badge variant={suite.execution_mode === "gha" ? "warning" : "info"}>
+                {suite.execution_mode === "gha" ? "GHA" : "Container"}
+              </Badge>
+            </div>
           </div>
         </div>
 

@@ -74,8 +74,11 @@ func (s *TestRunService) TriggerRun(ctx context.Context, userID, suiteID uuid.UU
 		return nil, fmt.Errorf("get repo: %w", err)
 	}
 
-	if repo.CloneStatus != model.CloneStatusReady || repo.LocalPath == nil {
-		return nil, ErrCloneNotReady
+	// Container mode requires clone to be ready; GHA mode doesn't
+	if suite.ExecutionMode == model.ExecutionModeContainer {
+		if repo.CloneStatus != model.CloneStatusReady || repo.LocalPath == nil {
+			return nil, ErrCloneNotReady
+		}
 	}
 
 	// Verify team membership (not viewer)
@@ -127,19 +130,45 @@ func (s *TestRunService) TriggerRun(ctx context.Context, userID, suiteID uuid.UU
 	if suite.ConfigPath != nil {
 		configPath = *suite.ConfigPath
 	}
+	dockerImage := ""
+	if suite.DockerImage != nil {
+		dockerImage = *suite.DockerImage
+	}
+	testCommand := ""
+	if suite.TestCommand != nil {
+		testCommand = *suite.TestCommand
+	}
+	ghaWorkflowID := ""
+	if suite.GHAWorkflowID != nil {
+		ghaWorkflowID = *suite.GHAWorkflowID
+	}
+	envVars := make(map[string]string)
+	for k, v := range suite.EnvVars {
+		envVars[k] = v
+	}
+
+	localPath := ""
+	if repo.LocalPath != nil {
+		localPath = *repo.LocalPath
+	}
 
 	payload := &model.JobPayload{
 		TestRunID:          run.ID.String(),
 		TestSuiteID:        suite.ID.String(),
 		RepoID:             repo.ID.String(),
 		RepositoryFullName: repo.GithubFullName,
-		LocalPath:          *repo.LocalPath,
+		LocalPath:          localPath,
 		DefaultBranch:      repo.DefaultBranch,
 		Branch:             req.Branch,
 		CommitHash:         req.CommitHash,
-		TestType:           string(suite.Type),
+		SuiteType:          suite.Type,
+		ExecutionMode:      suite.ExecutionMode,
+		DockerImage:        dockerImage,
+		TestCommand:        testCommand,
+		GHAWorkflowID:      ghaWorkflowID,
 		ConfigPath:         configPath,
 		TimeoutSeconds:     suite.TimeoutSeconds,
+		EnvVars:            envVars,
 	}
 
 	if err := s.queue.Push(ctx, payload); err != nil {
@@ -213,7 +242,7 @@ func (s *TestRunService) GetRun(ctx context.Context, userID, runID uuid.UUID) (*
 		resultResps[i] = dto.NewTestResultResponse(&results[i])
 	}
 
-	runResp := dto.NewTestRunResponse(run)
+	runResp := dto.NewTestRunResponseWithGHA(run, repo.GithubFullName)
 
 	// Get triggered-by username
 	if run.TriggeredBy != nil {
@@ -226,7 +255,8 @@ func (s *TestRunService) GetRun(ctx context.Context, userID, runID uuid.UUID) (*
 	detail := &dto.TestRunDetailResponse{
 		TestRunResponse: runResp,
 		SuiteName:       suite.Name,
-		SuiteType:       string(suite.Type),
+		SuiteType:       suite.Type,
+		ExecutionMode:   suite.ExecutionMode,
 		RepositoryID:    repo.ID.String(),
 		RepositoryName:  repo.Name,
 		Summary:         summary,

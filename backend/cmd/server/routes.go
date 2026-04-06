@@ -92,6 +92,29 @@ func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	runs.POST("/:id/cancel", runHandler.Cancel)
 }
 
+func registerWebhookRoutes(e *echo.Echo, db *sqlx.DB) {
+	runRepo := repository.NewTestRunRepository(db)
+	resultRepo := repository.NewTestResultRepository(db)
+	webhookHandler := handler.NewWebhookHandler(runRepo, resultRepo)
+
+	// No auth — run_id UUID acts as bearer token
+	webhooks := e.Group("/v1/webhooks")
+	webhooks.POST("/gha/:run_id", webhookHandler.GHACallback)
+}
+
+func registerDiscoveryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	repoRepo := repository.NewRepositoryRepository(db)
+	userRepo := repository.NewUserRepository(db)
+
+	discoveryService := service.NewDiscoveryService(repoRepo, cfg, log)
+	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	repos := e.Group("/v1/repositories", authMiddleware)
+	repos.POST("/:id/discover", discoveryHandler.Discover)
+	repos.GET("/:id/discovery", discoveryHandler.GetDiscovery)
+}
+
 func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
 	// Repositories
 	userRepo := repository.NewUserRepository(db)
