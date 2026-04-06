@@ -9,6 +9,7 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/config"
 	"github.com/sujaykumarsuman/verdox/backend/internal/dto"
 	mw "github.com/sujaykumarsuman/verdox/backend/internal/middleware"
+	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
 	"github.com/sujaykumarsuman/verdox/backend/internal/service"
 	"github.com/sujaykumarsuman/verdox/backend/pkg/response"
 	v "github.com/sujaykumarsuman/verdox/backend/pkg/validator"
@@ -16,11 +17,12 @@ import (
 
 type AuthHandler struct {
 	authService *service.AuthService
+	userRepo    repository.UserRepository
 	cfg         *config.Config
 }
 
-func NewAuthHandler(authService *service.AuthService, cfg *config.Config) *AuthHandler {
-	return &AuthHandler{authService: authService, cfg: cfg}
+func NewAuthHandler(authService *service.AuthService, userRepo repository.UserRepository, cfg *config.Config) *AuthHandler {
+	return &AuthHandler{authService: authService, userRepo: userRepo, cfg: cfg}
 }
 
 func (h *AuthHandler) Signup(c echo.Context) error {
@@ -125,6 +127,15 @@ func (h *AuthHandler) ResetPassword(c echo.Context) error {
 	return response.Success(c, http.StatusOK, dto.MessageResponse{
 		Message: "Password has been reset successfully. Please log in with your new password.",
 	})
+}
+
+func (h *AuthHandler) Me(c echo.Context) error {
+	userID := mw.GetUserID(c)
+	user, err := h.userRepo.GetByID(c.Request().Context(), userID)
+	if err != nil {
+		return response.Error(c, http.StatusNotFound, "NOT_FOUND", "User not found")
+	}
+	return response.Success(c, http.StatusOK, dto.NewUserResponse(user))
 }
 
 func (h *AuthHandler) setRefreshCookie(c echo.Context, token string) {

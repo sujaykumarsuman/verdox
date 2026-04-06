@@ -11,7 +11,7 @@
 COMPOSE         := docker compose
 COMPOSE_DEV     := $(COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml
 MIGRATE         := migrate
-MIGRATE_DB_URL  ?= postgres://verdox:changeme@localhost:5432/verdox?sslmode=disable
+MIGRATE_DB_URL  ?= postgres://verdox:verdoxpass@localhost:5432/verdox?sslmode=disable
 MIGRATION_DIR   := backend/migrations
 
 # ============================================================
@@ -30,6 +30,13 @@ help: ## Show this help message
 # ============================================================
 
 dev: ## Start full stack with hot reload (docker-compose.dev.yml)
+	@echo "Starting postgres and redis..."
+	@$(COMPOSE_DEV) up -d postgres redis
+	@echo "Waiting for PostgreSQL to be ready..."
+	@until $(COMPOSE_DEV) exec postgres pg_isready -U verdox -d verdox > /dev/null 2>&1; do sleep 1; done
+	@echo "Running migrations..."
+	@$(MIGRATE) -path $(MIGRATION_DIR) -database "$(MIGRATE_DB_URL)" up || true
+	@echo "Starting all services..."
 	$(COMPOSE_DEV) up --build
 
 dev-backend: ## Start backend only with air (Go hot reload)

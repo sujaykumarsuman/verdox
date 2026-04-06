@@ -20,10 +20,6 @@ interface AuthResponse {
   access_token: string;
 }
 
-interface TokenResponse {
-  access_token: string;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,13 +28,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const init = async () => {
       try {
-        await api<TokenResponse>("/v1/auth/refresh", { method: "POST" });
-        // If refresh succeeded, we need to get user info
-        // The refresh endpoint only returns access_token, not user data
-        // For now, we'll decode from the cookie or make a separate call
-        // Since we don't have a /me endpoint yet, we'll set a flag
-        setIsLoading(false);
+        await api("/v1/auth/refresh", { method: "POST" });
+        // Refresh succeeded — fetch user info
+        const data = await api<User>("/v1/auth/me");
+        setUser(data);
       } catch {
+        // No valid session
+      } finally {
         setIsLoading(false);
       }
     };

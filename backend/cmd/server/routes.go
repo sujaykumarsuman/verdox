@@ -23,7 +23,7 @@ func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	authService := service.NewAuthService(userRepo, sessionRepo, resetRepo, rdb, cfg, log)
 
 	// Handlers
-	authHandler := handler.NewAuthHandler(authService, cfg)
+	authHandler := handler.NewAuthHandler(authService, userRepo, cfg)
 
 	// Auth routes (public, with rate limiting)
 	auth := e.Group("/v1/auth")
@@ -33,6 +33,8 @@ func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	auth.POST("/forgot-password", authHandler.ForgotPassword, mw.ForgotPasswordRateLimit(rdb))
 	auth.POST("/reset-password", authHandler.ResetPassword)
 
-	// Logout requires authentication
-	auth.POST("/logout", authHandler.Logout, mw.Auth(cfg.JWTSecret, userRepo, rdb))
+	// Authenticated auth routes
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	auth.GET("/me", authHandler.Me, authMiddleware)
+	auth.POST("/logout", authHandler.Logout, authMiddleware)
 }

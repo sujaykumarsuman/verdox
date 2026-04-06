@@ -43,11 +43,10 @@ export function Sidebar() {
     >
       {/* Logo */}
       <div className="h-14 flex items-center px-4 border-b">
-        <Link href="/dashboard" className="flex items-center gap-2 overflow-hidden">
-          <span className="font-display text-[20px] text-accent shrink-0">V</span>
-          {!collapsed && (
-            <span className="font-display text-[20px] text-accent">erdox</span>
-          )}
+        <Link href="/dashboard" className="overflow-hidden">
+          <span className="font-display text-[20px] text-accent whitespace-nowrap">
+            {collapsed ? "V" : "Verdox"}
+          </span>
         </Link>
       </div>
 

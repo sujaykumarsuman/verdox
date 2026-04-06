@@ -46,8 +46,9 @@ export async function api<T>(
     },
   });
 
-  // Handle 401: try refresh once
-  if (res.status === 401) {
+  // Handle 401: try refresh once (skip for auth endpoints — they return 401 for invalid credentials)
+  const isAuthEndpoint = path.startsWith("/v1/auth/");
+  if (res.status === 401 && !isAuthEndpoint) {
     try {
       if (!refreshPromise) {
         refreshPromise = refreshAccessToken();

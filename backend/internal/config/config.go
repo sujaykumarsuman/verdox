@@ -65,6 +65,22 @@ func Load() (*Config, error) {
 	viper.SetDefault("FRONTEND_URL", "http://localhost:3000")
 	viper.SetDefault("VERDOX_REPO_BASE_PATH", "./data/repositories")
 
+	// Explicitly bind all config keys so AutomaticEnv picks up env vars
+	for _, key := range []string{
+		"APP_ENV", "APP_PORT",
+		"DATABASE_URL", "DB_MAX_OPEN_CONN", "DB_MAX_IDLE_CONN", "DB_MAX_LIFETIME",
+		"REDIS_URL",
+		"JWT_SECRET", "JWT_ACCESS_EXPIRY", "JWT_REFRESH_DAYS",
+		"BCRYPT_COST",
+		"ROOT_EMAIL", "ROOT_PASSWORD",
+		"FRONTEND_URL", "CORS_ORIGINS",
+		"LOG_LEVEL",
+		"VERDOX_REPO_BASE_PATH",
+		"GITHUB_TOKEN_ENCRYPTION_KEY",
+	} {
+		_ = viper.BindEnv(key)
+	}
+
 	// Ignore error if .env file doesn't exist — env vars may be set directly
 	_ = viper.ReadInConfig()
 
