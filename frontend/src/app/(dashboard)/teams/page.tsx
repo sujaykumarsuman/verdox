@@ -2,12 +2,13 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { Users, Settings, ArrowRight, Plus } from "lucide-react";
+import { Users, ArrowRight, Plus, GitBranch, Search } from "lucide-react";
 import { useTeams } from "@/hooks/use-teams";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateTeamDialog } from "@/components/team/create-team-dialog";
+import { RoleBadge } from "@/components/team/role-badge";
 
 export default function TeamsPage() {
   const { teams, isLoading, error, refetch } = useTeams();
@@ -29,10 +30,18 @@ export default function TeamsPage() {
             Your team memberships. Select a team to manage settings and GitHub PAT.
           </p>
         </div>
-        <Button onClick={() => setShowCreateDialog(true)}>
-          <Plus className="h-4 w-4" />
-          Create Team
-        </Button>
+        <div className="flex items-center gap-3">
+          <Link href="/teams/discover">
+            <Button variant="secondary">
+              <Search className="h-4 w-4" />
+              Discover
+            </Button>
+          </Link>
+          <Button onClick={() => setShowCreateDialog(true)}>
+            <Plus className="h-4 w-4" />
+            Create Team
+          </Button>
+        </div>
       </div>
 
       {/* Loading */}
@@ -87,15 +96,23 @@ export default function TeamsPage() {
                     <Users className="h-5 w-5 text-accent" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-[16px] font-semibold text-text-primary">
-                      {team.name}
-                    </h3>
-                    <p className="text-[13px] text-text-secondary">
-                      /{team.slug}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[16px] font-semibold text-text-primary">
+                        {team.name}
+                      </h3>
+                      {team.my_role && <RoleBadge role={team.my_role} />}
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <span className="text-[13px] text-text-secondary">/{team.slug}</span>
+                      <span className="flex items-center gap-1 text-[12px] text-text-secondary">
+                        <Users className="h-3 w-3" />{team.member_count ?? 0}
+                      </span>
+                      <span className="flex items-center gap-1 text-[12px] text-text-secondary">
+                        <GitBranch className="h-3 w-3" />{team.repo_count ?? 0}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 text-text-secondary">
-                    <Settings className="h-4 w-4" />
                     <ArrowRight className="h-4 w-4" />
                   </div>
                 </CardBody>

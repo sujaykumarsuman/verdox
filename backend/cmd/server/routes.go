@@ -15,22 +15,57 @@ import (
 )
 
 func registerTeamRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	// Repositories
 	teamRepo := repository.NewTeamRepository(db)
-	teamMemberRepo := repository.NewTeamMemberRepository(db)
+	memberRepo := repository.NewTeamMemberRepository(db)
+	joinReqRepo := repository.NewTeamJoinRequestRepository(db)
+	teamRepoRepo := repository.NewTeamRepoAssignmentRepository(db)
+	repoRepo := repository.NewRepositoryRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
+	// Services
 	githubService := service.NewGitHubService(log)
-	teamHandler := handler.NewTeamHandler(teamRepo, teamMemberRepo, githubService, cfg, log)
+	teamService := service.NewTeamService(teamRepo, memberRepo, joinReqRepo, teamRepoRepo, repoRepo, log)
 
+	// Handler
+	teamHandler := handler.NewTeamHandler(teamService, teamRepo, memberRepo, githubService, cfg, log)
+
+	// Middleware
 	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	requireAdmin := mw.RequireTeamRole(memberRepo, "admin")
+	requireAdminMaintainer := mw.RequireTeamRole(memberRepo, "admin", "maintainer")
+	requireMember := mw.RequireTeamRole(memberRepo, "admin", "maintainer", "viewer")
+
 	teams := e.Group("/v1/teams", authMiddleware)
+
+	// Non-parameterized routes FIRST (before /:id to avoid Echo treating "discover" as an ID)
 	teams.GET("", teamHandler.ListMyTeams)
 	teams.POST("", teamHandler.CreateTeam)
-	teams.GET("/:id", teamHandler.GetTeam)
-	teams.DELETE("/:id", teamHandler.DeleteTeam)
-	teams.PUT("/:id/pat", teamHandler.SetPAT)
-	teams.GET("/:id/pat/validate", teamHandler.ValidatePAT)
-	teams.DELETE("/:id/pat", teamHandler.RevokePAT)
+	teams.GET("/discover", teamHandler.DiscoverTeams)
+
+	// Team-level routes
+	teams.GET("/:id", teamHandler.GetTeam, requireMember)
+	teams.PUT("/:id", teamHandler.UpdateTeam, requireAdmin)
+	teams.DELETE("/:id", teamHandler.DeleteTeam, requireAdmin)
+
+	// PAT routes
+	teams.PUT("/:id/pat", teamHandler.SetPAT, requireAdmin)
+	teams.GET("/:id/pat/validate", teamHandler.GetPATStatus, requireMember)
+	teams.DELETE("/:id/pat", teamHandler.RevokePAT, requireAdmin)
+
+	// Member routes
+	teams.POST("/:id/members", teamHandler.InviteMember, requireAdminMaintainer)
+	teams.PUT("/:id/members/:userId", teamHandler.UpdateMember, requireAdminMaintainer)
+	teams.DELETE("/:id/members/:userId", teamHandler.RemoveMember) // self-removal handled in handler
+
+	// Repo assignment routes
+	teams.POST("/:id/repositories", teamHandler.AssignRepo, requireAdminMaintainer)
+	teams.DELETE("/:id/repositories/:repoId", teamHandler.UnassignRepo, requireAdminMaintainer)
+
+	// Join request routes
+	teams.POST("/:id/join-requests", teamHandler.SubmitJoinRequest)         // any auth user
+	teams.GET("/:id/join-requests", teamHandler.ListJoinRequests, requireAdminMaintainer)
+	teams.PATCH("/:id/join-requests/:requestId", teamHandler.ReviewJoinRequest, requireAdminMaintainer)
 }
 
 func registerRepositoryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger, cloneCh chan<- service.CloneJob) {

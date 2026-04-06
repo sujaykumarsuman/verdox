@@ -3,13 +3,14 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Settings, Shield, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { LayoutDashboard, Users, Settings, Shield, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/teams", label: "Teams", icon: Users },
+  { href: "/teams/discover", label: "Discover", icon: Search },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -53,7 +54,14 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 py-4 px-3 flex flex-col gap-1">
         {items.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          // Match exact path or prefix, but prefer the longest matching nav item
+          // so /teams/discover highlights "Discover" not "Teams"
+          const matchesThis = pathname === item.href || pathname.startsWith(item.href + "/");
+          const moreSpecificMatch = matchesThis && items.some(
+            (other) => other.href !== item.href && other.href.startsWith(item.href + "/") &&
+              (pathname === other.href || pathname.startsWith(other.href + "/"))
+          );
+          const isActive = matchesThis && !moreSpecificMatch;
           return (
             <Link
               key={item.href}

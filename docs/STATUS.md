@@ -2,7 +2,7 @@
 
 > Tracks build progress across all phases. Mirrors BUILD-PLAN.md structure.
 
-**Last updated:** 2026-04-06
+**Last updated:** 2026-04-07
 
 ---
 
@@ -13,12 +13,12 @@
 | Phase 0 -- Documentation | 22/22 | `[====================] 100%` |
 | Phase 1 -- Foundation | 42/42 | `[====================] 100%` |
 | Phase 2 -- Repository Management | 18/18 | `[====================] 100%` |
-| Phase 3 -- Test Execution | 0/34 | `[....................] 0%` |
-| Phase 4 -- Teams & Access Control | 0/22 | `[....................] 0%` |
+| Phase 3 -- Test Execution | 34/34 | `[====================] 100%` |
+| Phase 4 -- Teams & Access Control | 22/22 | `[====================] 100%` |
 | Phase 5 -- Admin & Polish | 0/30 | `[....................] 0%` |
 | Phase 6 -- Deployment & Monitoring | 0/20 | `[....................] 0%` |
 | Phase 7 -- Testing & Hardening | 0/22 | `[....................] 0%` |
-| **Total** | **82/210** | `[=======.............] 39%` |
+| **Total** | **138/210** | `[=============.......] 66%` |
 
 ---
 
@@ -175,105 +175,105 @@
 ## Phase 3 -- Test Execution
 
 ```
-[....................] 0/34 complete
+[====================] 34/34 complete
 ```
 
 ### Test Suite CRUD
 
-- [ ] Implement test suite model and repository
-- [ ] Build test suite service layer
-- [ ] Write test suite HTTP handlers
+- [x] Implement test suite model and repository
+- [x] Build test suite service layer
+- [x] Write test suite HTTP handlers
 
 ### Job Queue
 
-- [ ] Implement job queue with PostgreSQL-backed storage
-- [ ] Build job dispatcher and worker pool
-- [ ] Add job status tracking and retry logic
+- [x] Implement job queue with PostgreSQL-backed storage
+- [x] Build job dispatcher and worker pool
+- [x] Add job status tracking and retry logic
 
 ### Test Runner
 
-- [ ] Implement container-based test runner (Docker-in-Docker)
-- [ ] Mount local clone read-only into test container
-- [ ] Build test output parser (JUnit XML, TAP, JSON)
-- [ ] Stream test logs via WebSocket
-- [ ] Implement test timeout and cancellation
-- [ ] Collect and store test artifacts
+- [x] Implement container-based test runner (Docker-in-Docker)
+- [x] Mount local clone read-only into test container
+- [x] Build test output parser (JUnit XML, TAP, JSON)
+- [x] Stream test logs via WebSocket
+- [x] Implement test timeout and cancellation
+- [x] Collect and store test artifacts
 
 ### Test Run API
 
-- [ ] Write test run HTTP handlers (trigger, status, results)
-- [ ] Implement commit-hash caching (skip re-run on same commit)
-- [ ] Implement run numbering (run-1, run-2, etc. per suite)
-- [ ] Implement test run history and filtering
+- [x] Write test run HTTP handlers (trigger, status, results)
+- [x] Implement commit-hash caching (skip re-run on same commit)
+- [x] Implement run numbering (run-1, run-2, etc. per suite)
+- [x] Implement test run history and filtering
 
 ### Frontend Test Pages
 
-- [ ] Build test suite list page
-- [ ] Build test suite detail and configuration page
-- [ ] Build test run trigger UI
-- [ ] Build real-time test run progress view
-- [ ] Build test results page with pass/fail breakdown
-- [ ] Build test history page with trend charts
+- [x] Build test suite list page
+- [x] Build test suite detail and configuration page
+- [x] Build test run trigger UI
+- [x] Build real-time test run progress view
+- [x] Build test results page with pass/fail breakdown
+- [x] Build test history page with trend charts
 
 ### Runner Infrastructure
 
-- [ ] Configure runner resource limits (CPU, memory, time)
-- [ ] Implement runner health monitoring
-- [ ] Add runner auto-scaling hooks
+- [x] Configure runner resource limits (CPU, memory, time)
+- [x] Implement runner health monitoring
+- [x] Add runner auto-scaling hooks
 
 ### Gate Checklist
 
-- [ ] Test suite can be created and configured
-- [ ] Test run can be triggered manually (admin/maintainer only)
-- [ ] Test runner mounts local clone read-only and executes tests in isolated container
-- [ ] Run numbering assigns sequential run-1, run-2, etc.
-- [ ] Commit-hash caching skips re-run on same commit
-- [ ] Test results are parsed and stored
-- [ ] Live log streaming works via WebSocket
-- [ ] Test run history is queryable
-- [ ] Failed tests can be re-run individually
+- [x] Test suite can be created and configured
+- [x] Test run can be triggered manually (admin/maintainer only)
+- [x] Test runner mounts local clone read-only and executes tests in isolated container
+- [x] Run numbering assigns sequential run-1, run-2, etc.
+- [x] Commit-hash caching skips re-run on same commit
+- [x] Test results are parsed and stored
+- [x] Live log streaming works via WebSocket
+- [x] Test run history is queryable
+- [x] Failed tests can be re-run individually
 
 ---
 
 ## Phase 4 -- Teams & Access Control
 
 ```
-[....................] 0/22 complete
+[====================] 22/22 complete
 ```
 
 ### Team CRUD
 
-- [ ] Implement team model and repository
-- [ ] Build team service with membership management
-- [ ] Implement join request flow (team_join_requests table)
-- [ ] Write team HTTP handlers (create, invite, remove, roles, join requests, discover)
+- [x] Implement team model and repository
+- [x] Build team service with membership management
+- [x] Implement join request flow (team_join_requests table)
+- [x] Write team HTTP handlers (create, invite, remove, roles, join requests, discover)
 
 ### Frontend Team Pages
 
-- [ ] Build team list page
-- [ ] Build team detail page with member list
-- [ ] Build team invite flow UI
-- [ ] Build team settings page
-- [ ] Build role assignment UI (admin/maintainer/viewer)
-- [ ] Build team switching UI in sidebar
-- [ ] Build team discovery page
+- [x] Build team list page
+- [x] Build team detail page with member list
+- [x] Build team invite flow UI
+- [x] Build team settings page
+- [x] Build role assignment UI (admin/maintainer/viewer)
+- [x] Build team switching UI in sidebar
+- [x] Build team discovery page
 
 ### Permission Enforcement
 
-- [ ] Implement role-based access control middleware
-- [ ] Enforce repository-level permissions
-- [ ] Enforce team-level permissions
+- [x] Implement role-based access control middleware
+- [x] Enforce repository-level permissions
+- [x] Enforce team-level permissions
 
 ### Gate Checklist
 
-- [ ] Team can be created and members invited
-- [ ] Team roles (admin, maintainer, viewer) are enforced
-- [ ] Join request flow works for discoverable teams
-- [ ] Team discovery page lists discoverable teams
-- [ ] Repository access is scoped to team
-- [ ] Non-members cannot access team resources
-- [ ] Team owner can transfer ownership
-- [ ] Invitation flow works end-to-end
+- [x] Team can be created and members invited
+- [x] Team roles (admin, maintainer, viewer) are enforced
+- [x] Join request flow works for discoverable teams
+- [x] Team discovery page lists discoverable teams
+- [x] Repository access is scoped to team
+- [x] Non-members cannot access team resources
+- [x] Team owner can transfer ownership
+- [x] Invitation flow works end-to-end
 
 ---
 
