@@ -11,14 +11,14 @@
 | Phase | Progress | Bar |
 |-------|----------|-----|
 | Phase 0 -- Documentation | 22/22 | `[====================] 100%` |
-| Phase 1 -- Foundation | 0/42 | `[....................] 0%` |
+| Phase 1 -- Foundation | 42/42 | `[====================] 100%` |
 | Phase 2 -- Repository Management | 0/18 | `[....................] 0%` |
 | Phase 3 -- Test Execution | 0/34 | `[....................] 0%` |
 | Phase 4 -- Teams & Access Control | 0/22 | `[....................] 0%` |
 | Phase 5 -- Admin & Polish | 0/30 | `[....................] 0%` |
 | Phase 6 -- Deployment & Monitoring | 0/20 | `[....................] 0%` |
 | Phase 7 -- Testing & Hardening | 0/22 | `[....................] 0%` |
-| **Total** | **22/210** | `[==..................] 10%` |
+| **Total** | **64/210** | `[======..............] 30%` |
 
 ---
 
@@ -56,81 +56,81 @@
 ## Phase 1 -- Foundation
 
 ```
-[....................] 0/42 complete
+[====================] 42/42 complete
 ```
 
 ### Project Scaffolding
 
-- [ ] Initialize Go module with dependency management
-- [ ] Create Next.js project with TypeScript configuration
-- [ ] Write Makefile with build, test, and dev targets
-- [ ] Create .env.example with all required variables
-- [ ] Configure .gitignore for Go, Node, and Docker artifacts
+- [x] Initialize Go module with dependency management
+- [x] Create Next.js project with TypeScript configuration
+- [x] Write Makefile with build, test, and dev targets
+- [x] Create .env.example with all required variables
+- [x] Configure .gitignore for Go, Node, and Docker artifacts
 
 ### Docker Infrastructure
 
-- [ ] Write docker-compose.yml for production
-- [ ] Write docker-compose.dev.yml for local development
-- [ ] Create backend Dockerfile (multi-stage build)
-- [ ] Create frontend Dockerfile (multi-stage build)
-- [ ] Write Nginx reverse proxy configuration
+- [x] Write docker-compose.yml for production
+- [x] Write docker-compose.dev.yml for local development
+- [x] Create backend Dockerfile (multi-stage build)
+- [x] Create frontend Dockerfile (multi-stage build)
+- [x] Write Nginx reverse proxy configuration
 
 ### Database Setup
 
-- [ ] Create SQL migration files for all tables
-- [ ] Implement migration runner in Go
-- [ ] Implement root user bootstrap from ROOT_EMAIL/ROOT_PASSWORD env vars
-- [ ] Configure connection pool and database helpers
+- [x] Create SQL migration files for all tables
+- [x] Implement migration runner in Go
+- [x] Implement root user bootstrap from ROOT_EMAIL/ROOT_PASSWORD env vars
+- [x] Configure connection pool and database helpers
 
 ### Backend Core
 
-- [ ] Implement configuration loader (env + file)
-- [ ] Set up structured logger (zerolog)
-- [ ] Initialize Echo server with middleware stack
-- [ ] Write standard API response helpers
-- [ ] Implement request validators
-- [ ] Add health check and readiness endpoints
+- [x] Implement configuration loader (env + file)
+- [x] Set up structured logger (zerolog)
+- [x] Initialize Echo server with middleware stack
+- [x] Write standard API response helpers
+- [x] Implement request validators
+- [x] Add health check and readiness endpoints
 
 ### Auth System
 
-- [ ] Implement user model and repository
-- [ ] Implement session model and repository
-- [ ] Build auth service layer
-- [ ] Write JWT token utilities (access + refresh)
-- [ ] Write password hashing utilities (bcrypt)
-- [ ] Build auth middleware (JWT validation)
-- [ ] Implement auth HTTP handlers (login, register, logout, refresh)
-- [ ] Add rate limiting middleware for auth endpoints
-- [ ] Implement password reset flow (token generation + email)
+- [x] Implement user model and repository
+- [x] Implement session model and repository
+- [x] Build auth service layer
+- [x] Write JWT token utilities (access + refresh)
+- [x] Write password hashing utilities (bcrypt)
+- [x] Build auth middleware (JWT validation)
+- [x] Implement auth HTTP handlers (login, register, logout, refresh)
+- [x] Add rate limiting middleware for auth endpoints
+- [x] Implement password reset flow (token generation + email)
 
 ### Frontend Foundation
 
-- [ ] Build root layout with metadata and font loading
-- [ ] Write global CSS with Verdox brand tokens
-- [ ] Configure Tailwind with custom theme
-- [ ] Create typed API client with interceptors
-- [ ] Implement auth context and session provider
-- [ ] Build base UI component library (Button, Input, Card, Modal, Toast)
-- [ ] Add Next.js middleware for route protection
+- [x] Build root layout with metadata and font loading
+- [x] Write global CSS with Verdox brand tokens
+- [x] Configure Tailwind with custom theme
+- [x] Create typed API client with interceptors
+- [x] Implement auth context and session provider
+- [x] Build base UI component library (Button, Input, Card, Modal, Toast)
+- [x] Add Next.js middleware for route protection
 
 ### Auth Pages
 
-- [ ] Build landing page with feature highlights
-- [ ] Build login page with form validation
-- [ ] Build signup page with form validation
-- [ ] Build forgot password page
-- [ ] Build reset password page
-- [ ] Build dashboard shell (sidebar, header, content area)
+- [x] Build landing page with feature highlights
+- [x] Build login page with form validation
+- [x] Build signup page with form validation
+- [x] Build forgot password page
+- [x] Build reset password page
+- [x] Build dashboard shell (sidebar, header, content area)
 
 ### Gate Checklist
 
-- [ ] User can register a new account
-- [ ] User can log in and receive JWT tokens
-- [ ] Token refresh works without re-login
-- [ ] Protected routes redirect unauthenticated users
-- [ ] Rate limiting blocks brute-force attempts
-- [ ] Docker Compose brings up all services
-- [ ] Health check endpoints return 200
+- [x] User can register a new account
+- [x] User can log in and receive JWT tokens
+- [x] Token refresh works without re-login
+- [x] Protected routes redirect unauthenticated users
+- [x] Rate limiting blocks brute-force attempts
+- [x] Docker Compose brings up all services
+- [x] Health check endpoints return 200
 
 ---
 
