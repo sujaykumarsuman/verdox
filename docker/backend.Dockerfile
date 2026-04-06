@@ -15,7 +15,7 @@ RUN go mod download && go mod verify
 COPY backend/ .
 
 # Build a statically linked binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 go build \
     -ldflags="-w -s" \
     -o /server \
     ./cmd/server
@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 FROM alpine:3.21
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata wget
+RUN apk add --no-cache ca-certificates tzdata wget git
 
 # Create non-root user
 RUN addgroup -S verdox && adduser -S verdox -G verdox
@@ -35,8 +35,11 @@ RUN addgroup -S verdox && adduser -S verdox -G verdox
 COPY --from=builder /server /server
 COPY backend/migrations /migrations
 
+# Create repository storage directory
+RUN mkdir -p /var/lib/verdox/repositories
+
 # Set ownership
-RUN chown -R verdox:verdox /server /migrations
+RUN chown -R verdox:verdox /server /migrations /var/lib/verdox
 
 USER verdox
 
