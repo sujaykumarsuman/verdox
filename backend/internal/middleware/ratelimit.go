@@ -79,6 +79,15 @@ func ForgotPasswordRateLimit(rdb *redis.Client) echo.MiddlewareFunc {
 	})
 }
 
+func BanReviewRateLimit(rdb *redis.Client) echo.MiddlewareFunc {
+	return RateLimit(rdb, RateLimitConfig{
+		Prefix:     "ban-review",
+		MaxReqs:    3,
+		WindowSecs: 300,
+		KeyFunc:    IPKeyFunc,
+	})
+}
+
 func RefreshRateLimit(rdb *redis.Client) echo.MiddlewareFunc {
 	return RateLimit(rdb, RateLimitConfig{
 		Prefix:     "refresh",

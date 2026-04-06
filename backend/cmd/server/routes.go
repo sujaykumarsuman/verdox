@@ -150,14 +150,56 @@ func registerDiscoveryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *
 	repos.GET("/:id/discovery", discoveryHandler.GetDiscovery)
 }
 
+func registerUserRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	userRepo := repository.NewUserRepository(db)
+	sessionRepo := repository.NewSessionRepository(db)
+	resetRepo := repository.NewPasswordResetRepository(db)
+	banReviewRepo := repository.NewBanReviewRepository(db)
+
+	authService := service.NewAuthService(userRepo, sessionRepo, resetRepo, banReviewRepo, rdb, cfg, log)
+	userHandler := handler.NewUserHandler(authService, userRepo)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+
+	users := e.Group("/v1/users", authMiddleware)
+	users.GET("/me", userHandler.GetProfile)
+	users.PUT("/me", userHandler.UpdateProfile)
+	users.PUT("/me/password", userHandler.ChangePassword)
+}
+
+func registerAdminRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	userRepo := repository.NewUserRepository(db)
+	sessionRepo := repository.NewSessionRepository(db)
+	banReviewRepo := repository.NewBanReviewRepository(db)
+	teamMemberRepo := repository.NewTeamMemberRepository(db)
+	teamRepo := repository.NewTeamRepository(db)
+
+	adminService := service.NewAdminService(userRepo, sessionRepo, banReviewRepo, teamMemberRepo, teamRepo, rdb, db, log)
+	adminHandler := handler.NewAdminHandler(adminService)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	requireAdmin := mw.RequireRole("root", "admin", "moderator")
+
+	admin := e.Group("/v1/admin", authMiddleware, requireAdmin)
+	admin.GET("/users", adminHandler.ListUsers)
+	admin.PUT("/users/:id", adminHandler.UpdateUser)
+	admin.GET("/users/:id/teams", adminHandler.GetUserTeams)
+	admin.PUT("/users/:id/teams", adminHandler.UpdateUserTeams)
+	admin.GET("/stats", adminHandler.GetStats)
+	admin.GET("/teams", adminHandler.ListAllTeams)
+	admin.GET("/ban-reviews", adminHandler.ListPendingBanReviews)
+	admin.PUT("/ban-reviews/:id", adminHandler.ReviewBan)
+}
+
 func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
 	// Repositories
 	userRepo := repository.NewUserRepository(db)
 	sessionRepo := repository.NewSessionRepository(db)
 	resetRepo := repository.NewPasswordResetRepository(db)
+	banReviewRepo := repository.NewBanReviewRepository(db)
 
 	// Services
-	authService := service.NewAuthService(userRepo, sessionRepo, resetRepo, rdb, cfg, log)
+	authService := service.NewAuthService(userRepo, sessionRepo, resetRepo, banReviewRepo, rdb, cfg, log)
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authService, userRepo, cfg)
@@ -169,6 +211,7 @@ func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	auth.POST("/refresh", authHandler.Refresh, mw.RefreshRateLimit(rdb))
 	auth.POST("/forgot-password", authHandler.ForgotPassword, mw.ForgotPasswordRateLimit(rdb))
 	auth.POST("/reset-password", authHandler.ResetPassword)
+	auth.POST("/ban-review", authHandler.RequestBanReview, mw.BanReviewRateLimit(rdb))
 
 	// Authenticated auth routes
 	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)

@@ -52,7 +52,7 @@ export function SignupForm() {
         if (err.code === "CONFLICT") {
           toast.error(err.message);
         } else if (err.details) {
-          setErrors(err.details);
+          setErrors(err.details as Record<string, string>);
         } else {
           toast.error(err.message);
         }

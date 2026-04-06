@@ -3,13 +3,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
 interface ApiError {
   code: string;
   message: string;
-  details?: Record<string, string>;
+  details?: Record<string, unknown>;
 }
 
 export class ApiRequestError extends Error {
   code: string;
   status: number;
-  details?: Record<string, string>;
+  details?: Record<string, unknown>;
 
   constructor(status: number, error: ApiError) {
     super(error.message);
@@ -36,6 +36,7 @@ export async function api<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const isAuthEndpoint = path.startsWith("/v1/auth/");
 
   const res = await fetch(url, {
     ...options,
@@ -46,8 +47,7 @@ export async function api<T>(
     },
   });
 
-  // Handle 401: try refresh once (skip for auth endpoints — they return 401 for invalid credentials)
-  const isAuthEndpoint = path.startsWith("/v1/auth/");
+  // Handle 401: try refresh once (skip for auth endpoints)
   if (res.status === 401 && !isAuthEndpoint) {
     try {
       if (!refreshPromise) {
@@ -56,7 +56,6 @@ export async function api<T>(
       await refreshPromise;
       refreshPromise = null;
 
-      // Retry original request
       const retryRes = await fetch(url, {
         ...options,
         credentials: "include",
@@ -67,27 +66,26 @@ export async function api<T>(
       });
 
       if (retryRes.status === 401) {
-        // Second 401 — redirect to login
         if (typeof window !== "undefined") {
-          window.location.href = "/login";
+          window.location.replace("/login");
         }
         throw new ApiRequestError(401, { code: "UNAUTHORIZED", message: "Session expired" });
       }
 
-      return handleResponse<T>(retryRes);
+      return parseResponse<T>(retryRes);
     } catch {
       refreshPromise = null;
       if (typeof window !== "undefined") {
-        window.location.href = "/login";
+        window.location.replace("/login");
       }
       throw new ApiRequestError(401, { code: "UNAUTHORIZED", message: "Session expired" });
     }
   }
 
-  return handleResponse<T>(res);
+  return parseResponse<T>(res);
 }
 
-async function handleResponse<T>(res: Response): Promise<T> {
+async function parseResponse<T>(res: Response): Promise<T> {
   if (res.status === 204) {
     return undefined as T;
   }

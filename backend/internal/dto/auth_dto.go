@@ -41,8 +41,27 @@ type UserResponse struct {
 	Email     string         `json:"email"`
 	Role      model.UserRole `json:"role"`
 	AvatarURL *string        `json:"avatar_url"`
+	IsActive  bool           `json:"is_active"`
+	IsBanned  bool           `json:"is_banned"`
 	CreatedAt string         `json:"created_at"`
 	UpdatedAt string         `json:"updated_at"`
+}
+
+type UpdateProfileRequest struct {
+	Username  *string `json:"username" validate:"omitempty,min=3,max=64"`
+	Email     *string `json:"email" validate:"omitempty,email,max=255"`
+	AvatarURL *string `json:"avatar_url" validate:"omitempty"`
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password" validate:"required"`
+	NewPassword     string `json:"new_password" validate:"required,strong_password"`
+}
+
+type BanReviewRequest struct {
+	Login         string `json:"login" validate:"required"`
+	Password      string `json:"password" validate:"required"`
+	Clarification string `json:"clarification" validate:"required,min=10,max=2000"`
 }
 
 func NewUserResponse(u *model.User) *UserResponse {
@@ -52,6 +71,8 @@ func NewUserResponse(u *model.User) *UserResponse {
 		Email:     u.Email,
 		Role:      u.Role,
 		AvatarURL: u.AvatarURL,
+		IsActive:  u.IsActive,
+		IsBanned:  u.IsBanned,
 		CreatedAt: u.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: u.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}

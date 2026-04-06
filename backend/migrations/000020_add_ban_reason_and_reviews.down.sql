@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS ban_reviews;
+
+ALTER TABLE users DROP COLUMN IF EXISTS ban_reason;

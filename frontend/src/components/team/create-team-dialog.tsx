@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createTeam } from "@/hooks/use-teams";
@@ -43,10 +44,13 @@ export function CreateTeamDialog({ open, onClose, onSuccess }: CreateTeamDialogP
       await createTeam(name.trim(), slug.trim());
       setName("");
       setSlug("");
+      toast.success("Team created successfully");
       onSuccess();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create team");
+      const msg = err instanceof Error ? err.message : "Failed to create team";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

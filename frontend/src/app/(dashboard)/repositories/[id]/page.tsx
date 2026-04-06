@@ -17,6 +17,7 @@ import {
   GitCommit,
   GitBranch,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useRepository, useBranches, useCommits, resyncRepository, retryClone, deleteRepository } from "@/hooks/use-repos";
 import { useTestSuites, runAllSuites, useDiscovery } from "@/hooks/use-tests";
 import { Button } from "@/components/ui/button";
@@ -60,9 +61,10 @@ export default function RepositoryDetailPage({
     setResyncing(true);
     try {
       await resyncRepository(id);
+      toast.success("Repository re-synced");
       refetchRepo();
-    } catch {
-      // Error handled by toast in future
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to re-sync");
     } finally {
       setResyncing(false);
     }
@@ -72,9 +74,10 @@ export default function RepositoryDetailPage({
     setRetrying(true);
     try {
       await retryClone(id);
+      toast.success("Clone retry started");
       refetchRepo();
-    } catch {
-      // Error handled by toast in future
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to retry clone");
     } finally {
       setRetrying(false);
     }
@@ -84,8 +87,10 @@ export default function RepositoryDetailPage({
     setDeleting(true);
     try {
       await deleteRepository(id);
+      toast.success("Repository deleted");
       router.push("/dashboard");
-    } catch {
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete repository");
       setDeleting(false);
     }
   };
@@ -287,8 +292,11 @@ export default function RepositoryDetailPage({
                   setRunningAll(true);
                   try {
                     await runAllSuites(id, activeBranch, latestCommit.sha);
+                    toast.success("All test suites triggered");
                     refetchSuites();
-                  } catch {}
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Failed to run suites");
+                  }
                   setRunningAll(false);
                 }}
                 loading={runningAll}

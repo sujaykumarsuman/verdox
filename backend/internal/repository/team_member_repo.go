@@ -38,6 +38,8 @@ type TeamMemberRepository interface {
 	Delete(ctx context.Context, teamID, userID uuid.UUID) error
 	CountAdmins(ctx context.Context, teamID uuid.UUID) (int, error)
 	CountMembers(ctx context.Context, teamID uuid.UUID) (int, error)
+	CountByUser(ctx context.Context, userID uuid.UUID) (int, error)
+	ListTeamIDsByUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type teamMemberRepo struct {
@@ -155,4 +157,24 @@ func (r *teamMemberRepo) CountMembers(ctx context.Context, teamID uuid.UUID) (in
 		"SELECT COUNT(*) FROM team_members WHERE team_id = $1 AND status = 'approved'",
 		teamID)
 	return count, err
+}
+
+func (r *teamMemberRepo) CountByUser(ctx context.Context, userID uuid.UUID) (int, error) {
+	var count int
+	err := r.db.GetContext(ctx, &count,
+		`SELECT COUNT(*) FROM team_members tm
+		JOIN teams t ON t.id = tm.team_id
+		WHERE tm.user_id = $1 AND tm.status = 'approved' AND t.deleted_at IS NULL`,
+		userID)
+	return count, err
+}
+
+func (r *teamMemberRepo) ListTeamIDsByUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.SelectContext(ctx, &ids,
+		`SELECT tm.team_id FROM team_members tm
+		JOIN teams t ON t.id = tm.team_id
+		WHERE tm.user_id = $1 AND tm.status = 'approved' AND t.deleted_at IS NULL`,
+		userID)
+	return ids, err
 }

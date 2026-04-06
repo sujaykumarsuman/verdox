@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/reset-password"];
-const authRoutes = ["/login", "/signup", "/forgot-password", "/reset-password"];
+const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/reset-password", "/banned"];
+const authRoutes = ["/login", "/signup", "/forgot-password", "/reset-password", "/banned"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -31,6 +31,18 @@ export function middleware(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("returnTo", pathname);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Admin route protection — redirect non-admin users
+  if (pathname.startsWith("/admin") && accessToken) {
+    try {
+      const payload = JSON.parse(atob(accessToken.split(".")[1]));
+      if (payload.role !== "root" && payload.role !== "admin" && payload.role !== "moderator") {
+        return NextResponse.redirect(new URL("/dashboard", request.url));
+      }
+    } catch {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
   }
 
   return NextResponse.next();
