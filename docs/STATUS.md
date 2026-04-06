@@ -12,13 +12,13 @@
 |-------|----------|-----|
 | Phase 0 -- Documentation | 22/22 | `[====================] 100%` |
 | Phase 1 -- Foundation | 42/42 | `[====================] 100%` |
-| Phase 2 -- Repository Management | 0/18 | `[....................] 0%` |
+| Phase 2 -- Repository Management | 18/18 | `[====================] 100%` |
 | Phase 3 -- Test Execution | 0/34 | `[....................] 0%` |
 | Phase 4 -- Teams & Access Control | 0/22 | `[....................] 0%` |
 | Phase 5 -- Admin & Polish | 0/30 | `[....................] 0%` |
 | Phase 6 -- Deployment & Monitoring | 0/20 | `[....................] 0%` |
 | Phase 7 -- Testing & Hardening | 0/22 | `[....................] 0%` |
-| **Total** | **64/210** | `[======..............] 30%` |
+| **Total** | **82/210** | `[=======.............] 39%` |
 
 ---
 
@@ -137,38 +137,38 @@
 ## Phase 2 -- Repository Management
 
 ```
-[....................] 0/18 complete
+[====================] 18/18 complete
 ```
 
 ### GitHub PAT Integration
 
-- [ ] Implement team PAT storage endpoint (PUT /api/v1/teams/:id/pat)
-- [ ] Implement PAT encryption (AES-256-GCM)
-- [ ] Implement PAT validation against GitHub API
+- [x] Implement team PAT storage endpoint (PUT /api/v1/teams/:id/pat)
+- [x] Implement PAT encryption (AES-256-GCM)
+- [x] Implement PAT validation against GitHub API
 
 ### Repository Addition & Clone
 
-- [ ] Implement repository model and repository layer
-- [ ] Build repository service (add by URL, list, configure)
-- [ ] Implement clone worker job (repo.clone)
-- [ ] Clone repo to VERDOX_REPO_BASE_PATH
-- [ ] Write repository HTTP handlers
+- [x] Implement repository model and repository layer
+- [x] Build repository service (add by URL, list, configure)
+- [x] Implement clone worker job (repo.clone)
+- [x] Clone repo to VERDOX_REPO_BASE_PATH
+- [x] Write repository HTTP handlers
 
 ### Frontend Repository Pages
 
-- [ ] Build repository list page with search and filter
-- [ ] Build repository detail page with clone status indicator
-- [ ] Build repository settings page
-- [ ] Build add-repository-by-URL flow UI
-- [ ] Add repository breadcrumb navigation
+- [x] Build repository list page with search and filter
+- [x] Build repository detail page with clone status indicator
+- [x] Build repository settings page
+- [x] Build add-repository-by-URL flow UI
+- [x] Add repository breadcrumb navigation
 
 ### Gate Checklist
 
-- [ ] PAT can be stored encrypted and validated
-- [ ] Repository can be added by GitHub URL
-- [ ] Clone worker clones repo to local path
-- [ ] Repository settings can be updated
-- [ ] Branches and commits are browsed from local clone
+- [x] PAT can be stored encrypted and validated
+- [x] Repository can be added by GitHub URL
+- [x] Clone worker clones repo to local path
+- [x] Repository settings can be updated
+- [x] Branches and commits are browsed from local clone
 
 ---
 

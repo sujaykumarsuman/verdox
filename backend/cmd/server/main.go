@@ -18,7 +18,9 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/config"
 	"github.com/sujaykumarsuman/verdox/backend/internal/handler"
 	mw "github.com/sujaykumarsuman/verdox/backend/internal/middleware"
+	"github.com/sujaykumarsuman/verdox/backend/internal/queue"
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
+	"github.com/sujaykumarsuman/verdox/backend/internal/runner"
 	"github.com/sujaykumarsuman/verdox/backend/internal/service"
 	"github.com/sujaykumarsuman/verdox/backend/internal/worker"
 	"github.com/sujaykumarsuman/verdox/backend/pkg/logger"
@@ -98,9 +100,21 @@ func main() {
 	defer workerCancel()
 	go cloneWorker.Start(workerCtx, cloneCh)
 
+	// Redis queue for test runs
+	redisQueue := queue.NewRedisQueue(rdb, cfg.RunnerMaxTimeout, log)
+
 	// Team & Repository routes
 	registerTeamRoutes(e, db, rdb, cfg, log)
 	registerRepositoryRoutes(e, db, rdb, cfg, log, cloneCh)
+
+	// Test suite & run routes
+	registerTestRoutes(e, db, rdb, cfg, log, redisQueue)
+
+	// Worker pool (embedded in backend process)
+	pool := runner.NewWorkerPool(cfg, redisQueue, db, rdb, log)
+	poolCtx, poolCancel := context.WithCancel(context.Background())
+	defer poolCancel()
+	pool.Start(poolCtx)
 
 	// Start server
 	port := cfg.AppPort
@@ -121,6 +135,9 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Info().Msg("shutting down server...")
+
+	// Stop worker pool first
+	pool.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
