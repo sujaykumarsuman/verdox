@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────���─
+   Verdox Design Tokens (Light Mode)
+   ──────────────────────────────────────── */
+:root {
+  --bg-primary: #FAFAF8;
+  --bg-secondary: #F0EDE6;
+  --bg-tertiary: #E8E5DD;
+  --text-primary: #1A1A1A;
+  --text-secondary: #6B6B6B;
+  --border: #E2DFD8;
+  --accent: #1C6D74;
+  --accent-light: #248F98;
+  --accent-dark: #155459;
+  --accent-subtle: #E8F4F5;
+  --success: #2D8A4E;
+  --danger: #C93B3B;
+  --warning: #D4910A;
+  --disabled: #B8B8B8;
+  --disabled-bg: #EDEDEB;
+  --overlay: rgba(0, 0, 0, 0.45);
+  --focus-ring: 0 0 0 2px #FAFAF8, 0 0 0 4px #1C6D74;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 4px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+/* ────────────────────────────────────────
+   Dark Mode
+   ──────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg-primary: #1A1A1A;
+  --bg-secondary: #242424;
+  --bg-tertiary: #2E2E2E;
+  --text-primary: #E8E8E8;
+  --text-secondary: #9A9A9A;
+  --border: #333333;
+  --disabled: #5A5A5A;
+  --disabled-bg: #2A2A2A;
+  --overlay: rgba(0, 0, 0, 0.65);
+  --focus-ring: 0 0 0 2px #1A1A1A, 0 0 0 4px #248F98;
+}
+
+/* ────────────────────────────────────────
+   Tailwind v4 Theme Extension
+   ──────────────────────────────────────── */
+@theme inline {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-light: var(--accent-light);
+  --color-accent-dark: var(--accent-dark);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-disabled: var(--disabled);
+  --color-disabled-bg: var(--disabled-bg);
+
+  --font-display: "DM Serif Display", Georgia, serif;
+  --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-card: var(--shadow-card);
+}
+
+/* ────────────────────────────────────────
+   Base Resets
+   ──────────────────────────────────────── */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
+
+* {
+  border-color: var(--border);
+}
