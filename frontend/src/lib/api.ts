@@ -95,7 +95,20 @@ async function parseResponse<T>(res: Response): Promise<T> {
     return undefined as T;
   }
 
-  const body = await res.json();
+  const text = await res.text();
+  let body: { data?: T; error?: ApiError };
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // Response is not valid JSON — extract what we can
+    if (!res.ok) {
+      throw new ApiRequestError(res.status, {
+        code: "PARSE_ERROR",
+        message: text.substring(0, 200) || `Request failed with status ${res.status}`,
+      });
+    }
+    throw new Error(`Invalid JSON response: ${text.substring(0, 200)}`);
+  }
 
   if (!res.ok) {
     throw new ApiRequestError(res.status, body.error || { code: "UNKNOWN", message: "An error occurred" });

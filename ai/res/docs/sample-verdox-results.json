@@ -1,0 +1,273 @@
+{
+  "repo": "skriptvalley-sa/careerdock",
+  "run_id": "91950d13-70d3-4e26-9b7b-5832f90e977c",
+  "branch": "main",
+  "commit_sha": "442ea762fccbc6b59597d7930b38c6f6e838f50e",
+  "timestamp": "2026-04-07T18:29:00Z",
+  "summary": {
+    "total_jobs": 5,
+    "total_tests": 6,
+    "total_cases": 13,
+    "passed": 13,
+    "failed": 0,
+    "skipped": 0,
+    "duration_seconds": 0.0,
+    "pass_rate": 100.0
+  },
+  "jobs": [
+    {
+      "job_id": "backend-lint",
+      "name": "Backend Lint",
+      "type": "lint",
+      "status": "passed",
+      "stats": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 0.0,
+        "pass_rate": 100.0
+      },
+      "tests": [
+        {
+          "test_id": "backend-lint",
+          "name": "Backend Lint",
+          "package": "",
+          "status": "passed",
+          "stats": {
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "duration_seconds": 0,
+            "pass_rate": 100
+          },
+          "cases": [
+            {
+              "case_id": "backend-lint",
+              "name": "Backend Lint",
+              "status": "passed",
+              "duration_seconds": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "job_id": "backend-test",
+      "name": "Backend Test",
+      "type": "unit",
+      "status": "passed",
+      "stats": {
+        "total": 9,
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 0.0,
+        "pass_rate": 100.0
+      },
+      "tests": [
+        {
+          "test_id": "github-com-skriptvalley-careerdock-internal-config",
+          "name": "config",
+          "package": "github.com/skriptvalley/careerdock/internal/config",
+          "status": "passed",
+          "stats": {
+            "total": 5,
+            "passed": 5,
+            "failed": 0,
+            "skipped": 0,
+            "duration_seconds": 0.0,
+            "pass_rate": 100.0
+          },
+          "cases": [
+            {
+              "case_id": "TestMustLoad_PanicsOnMissingRequiredValues",
+              "name": "TestMustLoad_PanicsOnMissingRequiredValues",
+              "status": "passed",
+              "duration_seconds": 0
+            },
+            {
+              "case_id": "TestMustLoad_SucceedsWithRequiredValues",
+              "name": "TestMustLoad_SucceedsWithRequiredValues",
+              "status": "passed",
+              "duration_seconds": 0
+            },
+            {
+              "case_id": "TestLogLevel",
+              "name": "TestLogLevel",
+              "status": "passed",
+              "duration_seconds": 0
+            },
+            {
+              "case_id": "TestAllowedOriginsParsing",
+              "name": "TestAllowedOriginsParsing",
+              "status": "passed",
+              "duration_seconds": 0
+            },
+            {
+              "case_id": "TestAppBaseURLTrimmed",
+              "name": "TestAppBaseURLTrimmed",
+              "status": "passed",
+              "duration_seconds": 0
+            }
+          ]
+        },
+        {
+          "test_id": "github-com-skriptvalley-careerdock-internal-service",
+          "name": "service",
+          "package": "github.com/skriptvalley/careerdock/internal/service",
+          "status": "passed",
+          "stats": {
+            "total": 4,
+            "passed": 4,
+            "failed": 0,
+            "skipped": 0,
+            "duration_seconds": 0.0,
+            "pass_rate": 100.0
+          },
+          "cases": [
+            {
+              "case_id": "TestLookupProductConfigForPayment_LegacyStarterPack",
+              "name": "TestLookupProductConfigForPayment_LegacyStarterPack",
+              "status": "passed",
+              "duration_seconds": 0
+            },
+            {
+              "case_id": "TestLookupProductConfigForPayment_LegacyPreviousPriceResolves",
+              "name": "TestLookupProductConfigForPayment_LegacyPreviousPriceResolves",
+              "status": "passed",
+              "duration_seconds": 0
+            },
+            {
+              "case_id": "TestLookupProductConfigForPayment_ActiveProductRequiresMatchingAmount",
+              "name": "TestLookupProductConfigForPayment_ActiveProductRequiresMatchingAmount",
+              "status": "passed",
+              "duration_seconds": 0
+            },
+            {
+              "case_id": "TestAllocationForPayment_CartSnapshotAggregatesCredits",
+              "name": "TestAllocationForPayment_CartSnapshotAggregatesCredits",
+              "status": "passed",
+              "duration_seconds": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "job_id": "backend-build",
+      "name": "Backend Build",
+      "type": "build",
+      "status": "passed",
+      "stats": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 0.0,
+        "pass_rate": 100.0
+      },
+      "tests": [
+        {
+          "test_id": "backend-build",
+          "name": "Backend Build",
+          "package": "",
+          "status": "passed",
+          "stats": {
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "duration_seconds": 0,
+            "pass_rate": 100
+          },
+          "cases": [
+            {
+              "case_id": "backend-build",
+              "name": "Backend Build",
+              "status": "passed",
+              "duration_seconds": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "job_id": "frontend-lint",
+      "name": "Frontend Lint",
+      "type": "lint",
+      "status": "passed",
+      "stats": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 0.0,
+        "pass_rate": 100.0
+      },
+      "tests": [
+        {
+          "test_id": "frontend-lint",
+          "name": "Frontend Lint",
+          "package": "",
+          "status": "passed",
+          "stats": {
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "duration_seconds": 0,
+            "pass_rate": 100
+          },
+          "cases": [
+            {
+              "case_id": "frontend-lint",
+              "name": "Frontend Lint",
+              "status": "passed",
+              "duration_seconds": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "job_id": "frontend-build",
+      "name": "Frontend Build",
+      "type": "build",
+      "status": "passed",
+      "stats": {
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 0.0,
+        "pass_rate": 100.0
+      },
+      "tests": [
+        {
+          "test_id": "frontend-build",
+          "name": "Frontend Build",
+          "package": "",
+          "status": "passed",
+          "stats": {
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "duration_seconds": 0,
+            "pass_rate": 100
+          },
+          "cases": [
+            {
+              "case_id": "frontend-build",
+              "name": "Frontend Build",
+              "status": "passed",
+              "duration_seconds": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

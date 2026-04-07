@@ -66,7 +66,7 @@ up: ## Start the production stack (detached)
 
 down: ## Stop and remove all containers and volumes
 	$(COMPOSE) down -v
-# 	@docker volume prune -f > /dev/null 2>&1 || true
+	@docker volume prune -f > /dev/null 2>&1 || true
 
 logs: ## Tail logs for all services (Ctrl+C to stop)
 	$(COMPOSE) logs -f

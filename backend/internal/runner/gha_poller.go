@@ -16,14 +16,17 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog"
 
+	"github.com/sujaykumarsuman/verdox/backend/internal/dto"
 	"github.com/sujaykumarsuman/verdox/backend/internal/model"
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
+	"github.com/sujaykumarsuman/verdox/backend/internal/service"
 )
 
 // artifactData holds the extracted contents from a verdox-results artifact.
 type artifactData struct {
-	Results       []ParsedResult
-	TestOutputLog string // raw content of test-output.log
+	Results          []ParsedResult
+	TestOutputLog    string // raw content of test-output.log
+	HierarchicalJSON []byte // raw JSON when payload has "suites" key (schema.json format)
 }
 
 type activeGHARun struct {
@@ -241,6 +244,23 @@ func (p *GHAPoller) handleCompletion(ctx context.Context, active *activeGHARun, 
 		logOutput = p.downloadGHARunLogs(ctx, active.Job.RepositoryFullName, ghaRunID, active.PAT)
 	}
 
+	if len(artifact.HierarchicalJSON) > 0 {
+		// Hierarchical payload (schema.json format with suites[])
+		// Use IngestionService to process into test_groups + test_cases
+		if err := p.ingestHierarchicalArtifact(ctx, active.RunID, artifact.HierarchicalJSON); err != nil {
+			p.log.Error().Err(err).Msg("failed to ingest hierarchical results, falling back")
+		} else {
+			// Hierarchical ingestion handles its own status update — skip the one at the end
+			if logOutput != "" {
+				runRepo.UpdateLogOutput(ctx, active.RunID, logOutput)
+			}
+			p.log.Info().
+				Str("run_id", active.RunID.String()).
+				Msg("GHA run completed with hierarchical results")
+			return
+		}
+	}
+
 	if len(artifact.Results) > 0 {
 		// We have structured per-test results from the artifact
 		modelResults := make([]model.TestResult, len(artifact.Results))
@@ -422,6 +442,17 @@ func (p *GHAPoller) downloadAndParseArtifact(ctx context.Context, pat, downloadU
 		}
 	}
 
+	// Try hierarchical format (schema.json with "jobs" key)
+	if len(resultsJSON) > 0 {
+		var probe struct {
+			Jobs json.RawMessage `json:"jobs"`
+		}
+		if err := json.Unmarshal(resultsJSON, &probe); err == nil && len(probe.Jobs) > 0 && string(probe.Jobs) != "null" {
+			p.log.Info().Int("bytes", len(resultsJSON)).Msg("detected hierarchical results payload")
+			return artifactData{HierarchicalJSON: resultsJSON, TestOutputLog: testOutputLog}
+		}
+	}
+
 	// Fallback: minimal verdox-results.json format
 	// The workflow generates: { verdox_run_id, status, exit_code }
 	// which doesn't have the full results array — create a single summary entry
@@ -505,6 +536,25 @@ func (p *GHAPoller) downloadGHARunLogs(ctx context.Context, repoFullName string,
 	result := allLogs.String()
 	p.log.Debug().Int("log_bytes", len(result)).Msg("downloaded GHA run logs")
 	return result
+}
+
+// ingestHierarchicalArtifact processes a schema.json hierarchical payload
+// from the downloaded artifact. It uses the IngestionService to create
+// test_groups and test_cases, then updates the run summary.
+func (p *GHAPoller) ingestHierarchicalArtifact(ctx context.Context, runID uuid.UUID, payload []byte) error {
+	var hierarchical dto.HierarchicalPayload
+	if err := json.Unmarshal(payload, &hierarchical); err != nil {
+		return fmt.Errorf("unmarshal hierarchical payload: %w", err)
+	}
+
+	suiteRepo := repository.NewTestSuiteRepository(p.db)
+	runRepo := repository.NewTestRunRepository(p.db)
+	groupRepo := repository.NewTestGroupRepository(p.db)
+	caseRepo := repository.NewTestCaseRepository(p.db)
+	repoRepo := repository.NewRepositoryRepository(p.db)
+
+	ingestionSvc := service.NewIngestionService(suiteRepo, runRepo, groupRepo, caseRepo, repoRepo, p.log)
+	return ingestionSvc.IngestForRun(ctx, runID, &hierarchical)
 }
 
 // recoverActiveRuns loads GHA runs that were dispatched but not completed.

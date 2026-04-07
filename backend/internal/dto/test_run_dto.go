@@ -46,7 +46,10 @@ type TestRunDetailResponse struct {
 	RepositoryName string               `json:"repository_name"`
 	LogOutput      *string              `json:"log_output,omitempty"`
 	Summary        *RunSummary          `json:"summary"`
+	SummaryV2      *RunSummaryV2        `json:"summary_v2,omitempty"`
 	Results        []TestResultResponse `json:"results"`
+	Groups         []TestGroupResponse  `json:"groups,omitempty"`
+	ReportID       *string              `json:"report_id,omitempty"`
 }
 
 type RunSummary struct {

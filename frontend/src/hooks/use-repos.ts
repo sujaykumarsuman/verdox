@@ -31,10 +31,13 @@ export function useRepositories(
     setError(null);
     try {
       const params = new URLSearchParams({
-        team_id: teamId,
         page: String(page),
         per_page: "20",
       });
+      // "all" omits team_id — backend returns repos from all user's teams
+      if (teamId !== "all") {
+        params.set("team_id", teamId);
+      }
       if (search) params.set("search", search);
 
       const data = await api<RepositoryListResponse>(

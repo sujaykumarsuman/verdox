@@ -100,7 +100,7 @@ export default function RepositoryDetailPage({
   // Loading state
   if (repoLoading) {
     return (
-      <div className="max-w-4xl">
+      <div className="max-w-6xl">
         <div className="h-5 w-32 bg-bg-tertiary rounded animate-pulse mb-4" />
         <div className="h-8 w-64 bg-bg-tertiary rounded animate-pulse mb-2" />
         <div className="h-5 w-48 bg-bg-tertiary rounded animate-pulse mb-8" />
@@ -113,7 +113,7 @@ export default function RepositoryDetailPage({
   // Error state
   if (repoError || !repo) {
     return (
-      <div className="max-w-4xl">
+      <div className="max-w-6xl">
         <Link
           href="/dashboard"
           className="inline-flex items-center gap-1.5 text-[14px] text-text-secondary hover:text-text-primary mb-4"
@@ -135,7 +135,7 @@ export default function RepositoryDetailPage({
   }
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-6xl">
       {/* Breadcrumb */}
       <Link
         href="/dashboard"

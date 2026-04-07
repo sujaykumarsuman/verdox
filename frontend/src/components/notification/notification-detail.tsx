@@ -85,11 +85,11 @@ export function NotificationDetail({ notification, onMarkRead, onActionComplete 
             <XCircle className="h-4 w-4" />
             Deny
           </button>
-          {notification.action_payload.username && (
+          {notification.action_payload.username ? (
             <span className="text-[13px] text-text-secondary ml-2">
-              User: {notification.action_payload.username as string}
+              User: {String(notification.action_payload.username)}
             </span>
-          )}
+          ) : null}
         </div>
       )}
     </div>

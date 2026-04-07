@@ -19,10 +19,10 @@ export default function DashboardPage() {
   const [page, setPage] = useState(1);
   const [showAddDialog, setShowAddDialog] = useState(false);
 
-  // Auto-select first team
+  // Auto-select "all" by default
   useEffect(() => {
     if (teams.length > 0 && !selectedTeamId) {
-      setSelectedTeamId(teams[0].id);
+      setSelectedTeamId("all");
     }
   }, [teams, selectedTeamId]);
 
@@ -119,7 +119,7 @@ export default function DashboardPage() {
             className="w-full rounded-[4px] border bg-bg-primary pl-10 pr-3 py-2 text-[14px] text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
           />
         </div>
-        {teams.length > 1 && (
+        {teams.length > 0 && (
           <select
             value={selectedTeamId}
             onChange={(e) => {
@@ -128,6 +128,7 @@ export default function DashboardPage() {
             }}
             className="rounded-[4px] border bg-bg-primary px-3 py-2 text-[14px] text-text-primary focus:border-accent focus:outline-none"
           >
+            <option value="all">All teams</option>
             {teams.map((team) => (
               <option key={team.id} value={team.id}>
                 {team.name}

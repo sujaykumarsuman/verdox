@@ -44,10 +44,6 @@ func (h *RepositoryHandler) Create(c echo.Context) error {
 // List handles GET /v1/repositories
 func (h *RepositoryHandler) List(c echo.Context) error {
 	teamID := c.QueryParam("team_id")
-	if teamID == "" {
-		return response.Error(c, http.StatusBadRequest, "MISSING_PARAM", "team_id query parameter is required")
-	}
-
 	search := c.QueryParam("search")
 	page := queryInt(c, "page", 1)
 	perPage := queryInt(c, "per_page", 20)
@@ -56,7 +52,17 @@ func (h *RepositoryHandler) List(c echo.Context) error {
 	}
 
 	userID := mw.GetUserID(c)
-	resp, err := h.repoService.ListRepositories(c.Request().Context(), userID, teamID, search, page, perPage)
+
+	var resp *dto.RepositoryListResponse
+	var err error
+
+	if teamID == "" {
+		// No team_id: list all repos the user has access to
+		resp, err = h.repoService.ListAllRepositories(c.Request().Context(), userID, search, page, perPage)
+	} else {
+		resp, err = h.repoService.ListRepositories(c.Request().Context(), userID, teamID, search, page, perPage)
+	}
+
 	if err != nil {
 		return h.mapError(c, err)
 	}

@@ -21,6 +21,7 @@ type RepositoryRepository interface {
 	Reactivate(ctx context.Context, repo *model.Repository) error
 	AddTeamRepository(ctx context.Context, teamID, repoID uuid.UUID, addedBy uuid.UUID) error
 	GetTeamIDForRepository(ctx context.Context, repoID uuid.UUID) (uuid.UUID, error)
+	ListByUserTeams(ctx context.Context, userID uuid.UUID, search string, page, perPage int) ([]model.Repository, int, error)
 }
 
 type repositoryRepo struct {
@@ -132,4 +133,43 @@ func (r *repositoryRepo) GetTeamIDForRepository(ctx context.Context, repoID uuid
 		return uuid.Nil, ErrNotFound
 	}
 	return teamID, err
+}
+
+func (r *repositoryRepo) ListByUserTeams(ctx context.Context, userID uuid.UUID, search string, page, perPage int) ([]model.Repository, int, error) {
+	offset := (page - 1) * perPage
+
+	countQuery := `SELECT COUNT(DISTINCT r.id) FROM repositories r
+		JOIN team_repositories tr ON tr.repository_id = r.id
+		JOIN team_members tm ON tm.team_id = tr.team_id
+		WHERE tm.user_id = $1 AND tm.status = 'approved' AND r.is_active = true`
+	listQuery := `SELECT DISTINCT r.* FROM repositories r
+		JOIN team_repositories tr ON tr.repository_id = r.id
+		JOIN team_members tm ON tm.team_id = tr.team_id
+		WHERE tm.user_id = $1 AND tm.status = 'approved' AND r.is_active = true`
+
+	args := []interface{}{userID}
+	argIdx := 2
+
+	if search != "" {
+		filter := fmt.Sprintf(` AND (r.name ILIKE $%d OR r.github_full_name ILIKE $%d)`, argIdx, argIdx)
+		countQuery += filter
+		listQuery += filter
+		args = append(args, "%"+search+"%")
+		argIdx++
+	}
+
+	listQuery += fmt.Sprintf(` ORDER BY r.created_at DESC LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
+
+	var total int
+	if err := r.db.GetContext(ctx, &total, countQuery, args...); err != nil {
+		return nil, 0, err
+	}
+
+	listArgs := append(args, perPage, offset)
+	var repos []model.Repository
+	if err := r.db.SelectContext(ctx, &repos, listQuery, listArgs...); err != nil {
+		return nil, 0, err
+	}
+
+	return repos, total, nil
 }

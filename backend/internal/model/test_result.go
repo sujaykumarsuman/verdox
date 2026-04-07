@@ -9,10 +9,12 @@ import (
 type TestResultStatus string
 
 const (
-	TestResultStatusPass  TestResultStatus = "pass"
-	TestResultStatusFail  TestResultStatus = "fail"
-	TestResultStatusSkip  TestResultStatus = "skip"
-	TestResultStatusError TestResultStatus = "error"
+	TestResultStatusPass    TestResultStatus = "pass"
+	TestResultStatusFail    TestResultStatus = "fail"
+	TestResultStatusSkip    TestResultStatus = "skip"
+	TestResultStatusError   TestResultStatus = "error"
+	TestResultStatusRunning TestResultStatus = "running"
+	TestResultStatusUnknown TestResultStatus = "unknown"
 )
 
 type TestResult struct {

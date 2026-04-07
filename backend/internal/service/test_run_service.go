@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -28,6 +29,7 @@ type TestRunService struct {
 	repoRepo       repository.RepositoryRepository
 	teamMemberRepo repository.TeamMemberRepository
 	userRepo       repository.UserRepository
+	groupRepo      repository.TestGroupRepository
 	queue          *queue.RedisQueue
 	rdb            *redis.Client
 	cfg            *config.Config
@@ -41,6 +43,7 @@ func NewTestRunService(
 	repoRepo repository.RepositoryRepository,
 	teamMemberRepo repository.TeamMemberRepository,
 	userRepo repository.UserRepository,
+	groupRepo repository.TestGroupRepository,
 	q *queue.RedisQueue,
 	rdb *redis.Client,
 	cfg *config.Config,
@@ -53,6 +56,7 @@ func NewTestRunService(
 		repoRepo:       repoRepo,
 		teamMemberRepo: teamMemberRepo,
 		userRepo:       userRepo,
+		groupRepo:      groupRepo,
 		queue:          q,
 		rdb:            rdb,
 		cfg:            cfg,
@@ -264,6 +268,25 @@ func (s *TestRunService) GetRun(ctx context.Context, userID, runID uuid.UUID) (*
 		RepositoryName:  repo.Name,
 		Summary:         summary,
 		Results:         resultResps,
+		ReportID:        run.ReportID,
+	}
+
+	// If the run has hierarchical data (summary JSONB set), include it
+	if run.Summary != nil {
+		var summaryV2 dto.RunSummaryV2
+		if err := json.Unmarshal([]byte(*run.Summary), &summaryV2); err == nil {
+			detail.SummaryV2 = &summaryV2
+		}
+
+		// Fetch groups for the hierarchical view
+		groups, err := s.groupRepo.ListByRunID(ctx, run.ID)
+		if err == nil && len(groups) > 0 {
+			groupResps := make([]dto.TestGroupResponse, len(groups))
+			for i := range groups {
+				groupResps[i] = dto.NewTestGroupResponse(&groups[i])
+			}
+			detail.Groups = groupResps
+		}
 	}
 
 	return detail, nil

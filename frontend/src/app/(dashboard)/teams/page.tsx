@@ -19,7 +19,7 @@ export default function TeamsPage() {
   }, [refetch]);
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -87,7 +87,7 @@ export default function TeamsPage() {
 
       {/* Team list */}
       {!isLoading && !error && teams.length > 0 && (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-5">
           {teams.map((team) => (
             <Link key={team.id} href={`/teams/${team.id}`}>
               <Card hoverable className="cursor-pointer">

@@ -19,6 +19,70 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/model"
 )
 
+// goTestJSONParserScript is an inline Python 3 script that parses go test -json
+// NDJSON output into Verdox's VerdoxResultsFile format. Embedded in workflow YAML.
+// Mirrors the logic of backend/internal/runner/parser.go ParseGoJSON().
+const goTestJSONParserScript = `import json, sys, os
+tests = {}
+try:
+    with open("test-output.json", "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            test = ev.get("Test", "")
+            if not test:
+                continue
+            if test not in tests:
+                tests[test] = {"status": "", "duration_ms": 0, "output": [], "error": ""}
+            t = tests[test]
+            action = ev.get("Action", "")
+            if action == "output":
+                t["output"].append(ev.get("Output", ""))
+            elif action == "pass":
+                t["status"] = "pass"
+                t["duration_ms"] = int(ev.get("Elapsed", 0) * 1000)
+            elif action == "fail":
+                t["status"] = "fail"
+                t["duration_ms"] = int(ev.get("Elapsed", 0) * 1000)
+                t["error"] = "".join(t["output"])[-2000:]
+            elif action == "skip":
+                t["status"] = "skip"
+except Exception:
+    pass
+results = []
+passed = failed = skipped = 0
+total_ms = 0
+for name, t in tests.items():
+    if not t["status"]:
+        continue
+    r = {"test_name": name, "status": t["status"], "duration_ms": t["duration_ms"]}
+    if t["error"]:
+        r["error_message"] = t["error"]
+    results.append(r)
+    if t["status"] == "pass":
+        passed += 1
+    elif t["status"] == "fail":
+        failed += 1
+    elif t["status"] == "skip":
+        skipped += 1
+    total_ms += t["duration_ms"]
+status = "failed" if failed > 0 else "passed"
+payload = {
+    "version": 2,
+    "status": status,
+    "summary": {"total": len(results), "passed": passed, "failed": failed, "skipped": skipped, "duration_ms": total_ms},
+    "results": results
+}
+with open("verdox-results.json", "w") as f:
+    json.dump(payload, f, indent=2)
+print(f"Verdox: {len(results)} tests parsed ({passed} passed, {failed} failed, {skipped} skipped)")
+`
+
 type ForkService struct {
 	client *http.Client
 	cfg    *config.Config
@@ -56,6 +120,7 @@ type SuiteWorkflowSpec struct {
 	Name           string
 	TestCommand    string
 	WorkflowConfig *model.WorkflowConfig
+	WorkflowYAML   *string // Raw YAML from editor; takes precedence over WorkflowConfig
 }
 
 // ForkRepo forks a repo under the service account. Returns the fork's full name.
@@ -186,8 +251,12 @@ func (s *ForkService) PushSuiteWorkflows(ctx context.Context, forkFullName, upst
 	// Create a blob + tree entry for each suite's workflow file
 	entries := make([]treeEntry, 0, len(specs))
 	for _, spec := range specs {
-		cfg := spec.WorkflowConfig
-		content := GenerateWorkflowYAML(spec.Name, cfg)
+		var content []byte
+		if spec.WorkflowYAML != nil && *spec.WorkflowYAML != "" {
+			content = []byte(*spec.WorkflowYAML)
+		} else {
+			content = GenerateWorkflowYAML(spec.Name, spec.WorkflowConfig)
+		}
 		blobSHA, err := s.createBlob(ctx, forkFullName, content)
 		if err != nil {
 			return "", fmt.Errorf("create blob for suite %q: %w", spec.Name, err)
@@ -604,6 +673,7 @@ func (s *ForkService) EnsureBranchWorkflows(ctx context.Context, repoID uuid.UUI
 			Name:           suite.Name,
 			TestCommand:    cmd,
 			WorkflowConfig: cfg,
+			WorkflowYAML:   suite.WorkflowYAML,
 		})
 	}
 
@@ -667,6 +737,7 @@ func (s *ForkService) RefreshSuiteWorkflows(ctx context.Context, repoID uuid.UUI
 			Name:           suite.Name,
 			TestCommand:    cmd,
 			WorkflowConfig: cfg,
+			WorkflowYAML:   suite.WorkflowYAML,
 		})
 	}
 
@@ -871,22 +942,21 @@ func GenerateWorkflowYAML(suiteName string, cfg *model.WorkflowConfig) []byte {
 	b.WriteString("        id: tests\n")
 	b.WriteString("        run: |\n")
 	b.WriteString("          set +e\n")
-	b.WriteString("          ${{ github.event.inputs.test_command }} 2>&1 | tee test-output.log\n")
-	b.WriteString("          echo \"exit_code=$?\" >> $GITHUB_OUTPUT\n")
+	b.WriteString("          ${{ github.event.inputs.test_command }} 2>&1 | tee test-output.json\n")
+	b.WriteString("          TEST_EXIT=$?\n")
+	b.WriteString("          cp test-output.json test-output.log\n")
+	b.WriteString("          echo \"exit_code=$TEST_EXIT\" >> $GITHUB_OUTPUT\n")
+	b.WriteString("          exit 0\n")
 	b.WriteString("        continue-on-error: true\n")
 	b.WriteString("\n")
 
-	// Verdox result collection (always present)
-	b.WriteString("      - name: Generate results JSON\n")
+	// Verdox result collection — parse go test -json NDJSON into structured results
+	b.WriteString("      - name: Parse test results\n")
 	b.WriteString("        if: always()\n")
 	b.WriteString("        run: |\n")
-	b.WriteString("          cat > verdox-results.json << 'RESULTS_EOF'\n")
-	b.WriteString("          {\n")
-	b.WriteString("            \"verdox_run_id\": \"${{ github.event.inputs.verdox_run_id }}\",\n")
-	b.WriteString("            \"status\": \"${{ steps.tests.outcome }}\",\n")
-	b.WriteString("            \"exit_code\": ${{ steps.tests.outputs.exit_code || 1 }}\n")
-	b.WriteString("          }\n")
-	b.WriteString("          RESULTS_EOF\n")
+	b.WriteString("          python3 << 'VERDOX_PARSER'\n")
+	b.WriteString(goTestJSONParserScript)
+	b.WriteString("          VERDOX_PARSER\n")
 	b.WriteString("\n")
 
 	b.WriteString("      - name: Upload results artifact\n")

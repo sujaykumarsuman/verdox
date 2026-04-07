@@ -1,0 +1,365 @@
+# Verdox CI Workflow for skriptvalley/careerdock
+# Mirrors the existing CI (ci.yml) with structured results collection.
+#
+# 5 jobs run in parallel, then verdox-report collects all results
+# and builds a hierarchical payload matching schema.json.
+
+name: "verdox: ci"
+
+on:
+  workflow_dispatch:
+    inputs:
+      verdox_run_id:
+        description: 'Verdox test run ID'
+        required: true
+      branch:
+        description: 'Branch to test'
+        required: true
+      commit_hash:
+        description: 'Commit hash to test'
+        required: true
+      callback_url:
+        description: 'Webhook callback URL'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ──────────────────────────────────────────────
+  # 1. Backend Lint
+  # ──────────────────────────────────────────────
+  backend-lint:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11
+          working-directory: backend
+
+  # ──────────────────────────────────────────────
+  # 2. Backend Test (produces per-test results)
+  # ──────────────────────────────────────────────
+  backend-test:
+    name: Backend Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: careerdock
+          POSTGRES_PASSWORD: careerdock
+          POSTGRES_DB: careerdock_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U careerdock"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Run tests
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://careerdock:careerdock@localhost:5432/careerdock_test?sslmode=disable
+          REDIS_URL: localhost:6379
+          JWT_SECRET: test-secret
+          ENVIRONMENT: test
+        run: |
+          set +e
+          go test -json -race -count=1 ./... 2>&1 | tee test-output.json
+          exit 0
+
+      - name: Parse test results
+        if: always()
+        working-directory: backend
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests = {}
+          pkg_durations = {}
+          try:
+              with open("test-output.json", "r") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test = ev.get("Test", "")
+                      pkg = ev.get("Package", "")
+                      action = ev.get("Action", "")
+                      if not test and pkg and action in ("pass", "fail"):
+                          pkg_durations[pkg] = ev.get("Elapsed", 0)
+                          continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests:
+                          tests[key] = {"name": test, "package": pkg, "status": "", "duration_s": 0, "output": [], "error": ""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output", ""))
+                      elif action == "pass":
+                          t["status"] = "passed"
+                          t["duration_s"] = ev.get("Elapsed", 0)
+                      elif action == "fail":
+                          t["status"] = "failed"
+                          t["duration_s"] = ev.get("Elapsed", 0)
+                          t["error"] = "".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"] = "skipped"
+          except Exception as e:
+              print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              pkg = t["package"]
+              if pkg not in packages: packages[pkg] = []
+              packages[pkg].append(t)
+          result = {"packages": {}, "pkg_durations": pkg_durations}
+          for pkg, cases in packages.items():
+              result["packages"][pkg] = [{"name": c["name"], "status": c["status"], "duration_seconds": c["duration_s"], "error_message": c["error"]} for c in cases]
+          with open("verdox-test-results.json", "w") as f:
+              json.dump(result, f)
+          total = sum(len(v) for v in result["packages"].values())
+          print(f"Verdox: parsed {total} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: backend/verdox-test-results.json
+
+  # ──────────────────────────────────────────────
+  # 3. Backend Build
+  # ──────────────────────────────────────────────
+  backend-build:
+    name: Backend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Build API
+        working-directory: backend
+        run: CGO_ENABLED=0 go build -o bin/api ./cmd/api/
+      - name: Build Worker
+        working-directory: backend
+        run: CGO_ENABLED=0 go build -o bin/worker ./cmd/worker/
+
+  # ──────────────────────────────────────────────
+  # 4. Frontend Lint
+  # ──────────────────────────────────────────────
+  frontend-lint:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+  # ──────────────────────────────────────────────
+  # 5. Frontend Build
+  # ──────────────────────────────────────────────
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  # ══════════════════════════════════════════════
+  # VERDOX REPORT — collects all job results
+  # ══════════════════════════════════════════════
+  verdox-report:
+    name: Verdox Report
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [backend-lint, backend-test, backend-build, frontend-lint, frontend-build]
+    steps:
+      - name: Download test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+        continue-on-error: true
+
+      - name: Build Verdox report
+        env:
+          VERDOX_RUN_ID: ${{ github.event.inputs.verdox_run_id }}
+          VERDOX_REPO: ${{ github.repository }}
+          VERDOX_BRANCH: ${{ github.event.inputs.branch }}
+          VERDOX_COMMIT: ${{ github.event.inputs.commit_hash }}
+          VERDOX_SUITES: |
+            [
+              {"id": "backend-lint", "name": "Backend Lint", "type": "lint", "result": "${{ needs.backend-lint.result }}"},
+              {"id": "backend-test", "name": "Backend Test", "type": "unit", "result": "${{ needs.backend-test.result }}", "results_file": "artifacts/backend-test-results/verdox-test-results.json"},
+              {"id": "backend-build", "name": "Backend Build", "type": "build", "result": "${{ needs.backend-build.result }}"},
+              {"id": "frontend-lint", "name": "Frontend Lint", "type": "lint", "result": "${{ needs.frontend-lint.result }}"},
+              {"id": "frontend-build", "name": "Frontend Build", "type": "build", "result": "${{ needs.frontend-build.result }}"}
+            ]
+        run: |
+          python3 << 'VERDOX_REPORT'
+          import json, os, sys
+          from datetime import datetime, timezone
+
+          run_id = os.environ.get("VERDOX_RUN_ID", "")
+          repo = os.environ.get("VERDOX_REPO", "")
+          branch = os.environ.get("VERDOX_BRANCH", "")
+          commit = os.environ.get("VERDOX_COMMIT", "")
+          suites_config = json.loads(os.environ.get("VERDOX_SUITES", "[]"))
+
+          suites = []
+          all_cases = all_passed = all_failed = all_skipped = 0
+          all_duration = 0.0
+
+          for sc in suites_config:
+              suite_id = sc["id"]
+              suite_name = sc["name"]
+              suite_type = sc["type"]
+              job_result = sc.get("result", "success")
+              results_file = sc.get("results_file", "")
+
+              tests = []
+              s_passed = s_failed = s_skipped = s_total = 0
+              s_duration = 0.0
+
+              if results_file and os.path.exists(results_file):
+                  with open(results_file) as f:
+                      data = json.load(f)
+                  pkg_dur = data.get("pkg_durations", {})
+                  for pkg, cases in data.get("packages", {}).items():
+                      pkg_slug = pkg.replace("/", "-").replace(".", "-")[-60:]
+                      pkg_name = pkg.split("/")[-1] if "/" in pkg else pkg
+                      pkg_elapsed = pkg_dur.get(pkg, 0)
+                      test_cases = []
+                      t_p = t_f = t_s = 0
+                      t_dur = 0.0
+                      for c in cases:
+                          st = c.get("status", "unknown")
+                          dur = c.get("duration_seconds", 0)
+                          tc = {"case_id": c["name"], "name": c["name"], "status": st, "duration_seconds": dur}
+                          if c.get("error_message"): tc["error_message"] = c["error_message"]
+                          test_cases.append(tc)
+                          if st == "passed": t_p += 1
+                          elif st == "failed": t_f += 1
+                          elif st == "skipped": t_s += 1
+                          t_dur += dur
+                      if pkg_elapsed > t_dur: t_dur = pkg_elapsed
+                      t_total = len(test_cases)
+                      t_status = "failed" if t_f > 0 else "passed"
+                      t_rate = round(t_p / t_total * 100, 2) if t_total > 0 else 0
+                      tests.append({
+                          "test_id": pkg_slug, "name": pkg_name, "package": pkg,
+                          "status": t_status,
+                          "stats": {"total": t_total, "passed": t_p, "failed": t_f, "skipped": t_s, "duration_seconds": round(t_dur, 2), "pass_rate": t_rate},
+                          "cases": test_cases
+                      })
+                      s_passed += t_p; s_failed += t_f; s_skipped += t_s
+                      s_total += t_total; s_duration += t_dur
+              else:
+                  st = "passed" if job_result == "success" else "failed"
+                  tests.append({
+                      "test_id": suite_id, "name": suite_name, "package": "",
+                      "status": st,
+                      "stats": {"total": 1, "passed": 1 if st == "passed" else 0, "failed": 1 if st == "failed" else 0, "skipped": 0, "duration_seconds": 0, "pass_rate": 100 if st == "passed" else 0},
+                      "cases": [{"case_id": suite_id, "name": suite_name, "status": st, "duration_seconds": 0}]
+                  })
+                  s_total = 1
+                  if st == "passed": s_passed = 1
+                  else: s_failed = 1
+
+              suite_status = "failed" if s_failed > 0 else "passed"
+              suite_rate = round(s_passed / s_total * 100, 2) if s_total > 0 else 0
+              suites.append({
+                  "job_id": suite_id, "name": suite_name, "type": suite_type,
+                  "status": suite_status,
+                  "stats": {"total": s_total, "passed": s_passed, "failed": s_failed, "skipped": s_skipped, "duration_seconds": round(s_duration, 2), "pass_rate": suite_rate},
+                  "tests": tests
+              })
+              all_cases += s_total; all_passed += s_passed; all_failed += s_failed
+              all_skipped += s_skipped; all_duration += s_duration
+
+          all_rate = round(all_passed / all_cases * 100, 2) if all_cases > 0 else 0
+          payload = {
+              "repo": repo, "run_id": run_id, "branch": branch, "commit_sha": commit,
+              "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "summary": {
+                  "total_jobs": len(suites),
+                  "total_tests": sum(len(s["tests"]) for s in suites),
+                  "total_cases": all_cases,
+                  "passed": all_passed, "failed": all_failed, "skipped": all_skipped,
+                  "duration_seconds": round(all_duration, 2), "pass_rate": all_rate
+              },
+              "jobs": suites
+          }
+          with open("verdox-results.json", "w") as f:
+              json.dump(payload, f, indent=2)
+          print(f"Verdox: {len(suites)} suites, {all_cases} cases ({all_passed}P/{all_failed}F/{all_skipped}S)")
+          VERDOX_REPORT
+
+      - name: Upload Verdox results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdox-results
+          path: verdox-results.json
+          retention-days: 7
+
+      - name: Callback to Verdox
+        if: always() && github.event.inputs.callback_url != ''
+        run: |
+          curl -s -X POST "${{ github.event.inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -d @verdox-results.json || true
