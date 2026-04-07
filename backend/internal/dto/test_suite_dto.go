@@ -15,6 +15,7 @@ type CreateTestSuiteRequest struct {
 	TestCommand     *string               `json:"test_command"`
 	TimeoutSeconds  *int                  `json:"timeout_seconds" validate:"omitempty,min=30,max=3600"`
 	WorkflowConfig  *model.WorkflowConfig `json:"workflow_config"`
+	WorkflowYAML    *string               `json:"workflow_yaml"`
 	// Legacy fields kept for backward compat
 	DockerImage     *string               `json:"docker_image" validate:"omitempty,max=255"`
 	GHAWorkflowID   *string               `json:"gha_workflow_id" validate:"omitempty,max=255"`
@@ -46,6 +47,7 @@ type TestSuiteResponse struct {
 	TestCommand     *string                `json:"test_command"`
 	TimeoutSeconds  int                    `json:"timeout_seconds"`
 	WorkflowConfig  model.WorkflowConfig   `json:"workflow_config"`
+	WorkflowYAML    *string                `json:"workflow_yaml,omitempty"`
 	DockerImage     *string                `json:"docker_image"`
 	GHAWorkflowID   *string                `json:"gha_workflow_id"`
 	EnvVars         map[string]string       `json:"env_vars"`
@@ -68,6 +70,7 @@ func NewTestSuiteResponse(s *model.TestSuite) TestSuiteResponse {
 		TestCommand:     s.TestCommand,
 		TimeoutSeconds:  s.TimeoutSeconds,
 		WorkflowConfig:  model.WorkflowConfig(s.WorkflowConfig),
+		WorkflowYAML:    s.WorkflowYAML,
 		DockerImage:     s.DockerImage,
 		GHAWorkflowID:   s.GHAWorkflowID,
 		EnvVars:         envVars,

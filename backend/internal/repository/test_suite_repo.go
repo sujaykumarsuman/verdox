@@ -16,6 +16,7 @@ type TestSuiteRepository interface {
 	ListByRepositoryID(ctx context.Context, repoID uuid.UUID) ([]model.TestSuite, error)
 	Update(ctx context.Context, suite *model.TestSuite) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	FindByRepoAndName(ctx context.Context, repoID uuid.UUID, name string) (*model.TestSuite, error)
 }
 
 type testSuiteRepo struct {
@@ -27,13 +28,13 @@ func NewTestSuiteRepository(db *sqlx.DB) TestSuiteRepository {
 }
 
 func (r *testSuiteRepo) Create(ctx context.Context, suite *model.TestSuite) error {
-	query := `INSERT INTO test_suites (repository_id, name, type, execution_mode, docker_image, test_command, gha_workflow_id, env_vars, config_path, timeout_seconds, workflow_config)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	query := `INSERT INTO test_suites (repository_id, name, type, execution_mode, docker_image, test_command, gha_workflow_id, env_vars, config_path, timeout_seconds, workflow_config, workflow_yaml)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, updated_at`
 	return r.db.QueryRowxContext(ctx, query,
 		suite.RepositoryID, suite.Name, suite.Type, suite.ExecutionMode,
 		suite.DockerImage, suite.TestCommand, suite.GHAWorkflowID, suite.EnvVars,
-		suite.ConfigPath, suite.TimeoutSeconds, suite.WorkflowConfig,
+		suite.ConfigPath, suite.TimeoutSeconds, suite.WorkflowConfig, suite.WorkflowYAML,
 	).Scan(&suite.ID, &suite.CreatedAt, &suite.UpdatedAt)
 }
 
@@ -69,4 +70,14 @@ func (r *testSuiteRepo) Update(ctx context.Context, suite *model.TestSuite) erro
 func (r *testSuiteRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM test_suites WHERE id = $1", id)
 	return err
+}
+
+func (r *testSuiteRepo) FindByRepoAndName(ctx context.Context, repoID uuid.UUID, name string) (*model.TestSuite, error) {
+	var suite model.TestSuite
+	err := r.db.GetContext(ctx, &suite,
+		"SELECT * FROM test_suites WHERE repository_id = $1 AND name = $2", repoID, name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &suite, err
 }

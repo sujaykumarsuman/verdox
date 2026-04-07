@@ -130,7 +130,10 @@ func main() {
 	registerTestRoutes(e, db, rdb, cfg, log, redisQueue)
 
 	// Webhook routes (no auth)
-	registerWebhookRoutes(e, db)
+	registerWebhookRoutes(e, db, log)
+
+	// Hierarchy routes (authenticated read endpoints for groups/cases)
+	registerHierarchyRoutes(e, db, rdb, cfg, log)
 
 	// Discovery routes (if OpenAI API key configured)
 	if cfg.OpenAIAPIKey != "" {

@@ -25,6 +25,8 @@ type TestRunRepository interface {
 	FindByGHARunID(ctx context.Context, ghaRunID int64) (*model.TestRun, error)
 	UpdateLogOutput(ctx context.Context, id uuid.UUID, logOutput string) error
 	ListActiveGHARuns(ctx context.Context) ([]model.TestRun, error)
+	UpdateSummaryAndFinish(ctx context.Context, id uuid.UUID, summary model.SummaryJSON, status model.TestRunStatus) error
+	ListByReportID(ctx context.Context, reportID string) ([]model.TestRun, error)
 }
 
 type testRunRepo struct {
@@ -174,6 +176,23 @@ func (r *testRunRepo) ListActiveGHARuns(ctx context.Context) ([]model.TestRun, e
 	var runs []model.TestRun
 	err := r.db.SelectContext(ctx, &runs,
 		"SELECT * FROM test_runs WHERE gha_run_id IS NOT NULL AND status IN ('queued', 'running') ORDER BY created_at")
+	if err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
+func (r *testRunRepo) UpdateSummaryAndFinish(ctx context.Context, id uuid.UUID, summary model.SummaryJSON, status model.TestRunStatus) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE test_runs SET summary = $1, status = $2, finished_at = now() WHERE id = $3",
+		summary, status, id)
+	return err
+}
+
+func (r *testRunRepo) ListByReportID(ctx context.Context, reportID string) ([]model.TestRun, error) {
+	var runs []model.TestRun
+	err := r.db.SelectContext(ctx, &runs,
+		"SELECT * FROM test_runs WHERE report_id = $1 ORDER BY created_at", reportID)
 	if err != nil {
 		return nil, err
 	}

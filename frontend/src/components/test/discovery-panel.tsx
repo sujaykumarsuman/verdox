@@ -49,8 +49,8 @@ export function DiscoveryPanel({
                     {suggestion.name}
                   </span>
                   <Badge variant="neutral">{suggestion.type}</Badge>
-                  <Badge variant={suggestion.execution_mode === "container" ? "info" : "warning"}>
-                    {suggestion.execution_mode === "container" ? "Container" : "GHA"}
+                  <Badge variant={(suggestion.execution_mode as string) === "container" ? "info" : "warning"}>
+                    {(suggestion.execution_mode as string) === "container" ? "Container" : "GHA"}
                   </Badge>
                 </div>
                 <p className="text-[12px] text-text-secondary">

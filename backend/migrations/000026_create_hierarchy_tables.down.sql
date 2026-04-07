@@ -1,0 +1,2 @@
+-- PostgreSQL does not support removing enum values; this is a no-op.
+-- The values 'running' and 'unknown' will remain in the enum.

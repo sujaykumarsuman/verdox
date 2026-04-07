@@ -125,6 +125,7 @@ type TestSuite struct {
 	ConfigPath      *string            `db:"config_path" json:"config_path"`
 	TimeoutSeconds  int                `db:"timeout_seconds" json:"timeout_seconds"`
 	WorkflowConfig  WorkflowConfigJSON `db:"workflow_config" json:"workflow_config"`
+	WorkflowYAML    *string            `db:"workflow_yaml" json:"workflow_yaml,omitempty"`
 	CreatedAt       time.Time          `db:"created_at" json:"created_at"`
 	UpdatedAt       time.Time          `db:"updated_at" json:"updated_at"`
 }

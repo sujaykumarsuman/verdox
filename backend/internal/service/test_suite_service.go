@@ -73,6 +73,7 @@ func (s *TestSuiteService) CreateSuite(ctx context.Context, userID, repoID uuid.
 		ConfigPath:     req.ConfigPath,
 		TimeoutSeconds: timeout,
 		WorkflowConfig: wfConfig,
+		WorkflowYAML:   req.WorkflowYAML,
 	}
 
 	if err := s.suiteRepo.Create(ctx, suite); err != nil {
@@ -86,6 +87,23 @@ func (s *TestSuiteService) CreateSuite(ctx context.Context, userID, repoID uuid.
 				s.log.Error().Err(err).Str("repo_id", repoID.String()).Msg("failed to refresh suite workflows after create")
 			}
 		}()
+	}
+
+	resp := dto.NewTestSuiteResponse(suite)
+	return &resp, nil
+}
+
+func (s *TestSuiteService) GetSuite(ctx context.Context, userID, suiteID uuid.UUID) (*dto.TestSuiteResponse, error) {
+	suite, err := s.suiteRepo.GetByID(ctx, suiteID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrSuiteNotFound
+		}
+		return nil, fmt.Errorf("get suite: %w", err)
+	}
+
+	if err := s.verifyMember(ctx, userID, suite.RepositoryID); err != nil {
+		return nil, err
 	}
 
 	resp := dto.NewTestSuiteResponse(suite)

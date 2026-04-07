@@ -17,6 +17,7 @@ export interface TestSuite {
   config_path: string | null;
   timeout_seconds: number;
   workflow_config: WorkflowConfig;
+  workflow_yaml: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -132,4 +133,60 @@ export interface DiscoveryResponse {
   repository_id: string;
   suggestions: DiscoverySuggestion[];
   scanned_at: string;
+}
+
+// --- Hierarchy Types (Phase 2) ---
+
+export interface TestGroup {
+  id: string;
+  group_id: string;
+  name: string;
+  package: string | null;
+  status: TestResultStatus;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration_ms: number | null;
+  pass_rate: number | null;
+  created_at: string;
+}
+
+export interface TestCaseItem {
+  id: string;
+  case_id: string;
+  name: string;
+  status: TestResultStatus;
+  duration_ms: number | null;
+  error_message: string | null;
+  stack_trace: string | null;
+  retry_count: number;
+  logs_url: string | null;
+  created_at: string;
+}
+
+export interface RunSummaryV2 {
+  total_jobs: number;
+  total_cases: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration_ms: number;
+  pass_rate: number;
+}
+
+export interface TestRunDetailV2 extends TestRunDetail {
+  summary_v2?: RunSummaryV2 | null;
+  groups?: TestGroup[];
+  report_id?: string | null;
+}
+
+export interface GroupCasesResponse {
+  cases: TestCaseItem[];
+  meta: PaginationMeta;
+}
+
+export interface ReportResponse {
+  report_id: string;
+  runs: TestRun[];
 }

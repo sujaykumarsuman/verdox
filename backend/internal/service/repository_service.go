@@ -217,6 +217,34 @@ func (s *RepositoryService) ListRepositories(ctx context.Context, userID uuid.UU
 	}, nil
 }
 
+// ListAllRepositories lists all repositories the user has access to across all their teams.
+func (s *RepositoryService) ListAllRepositories(ctx context.Context, userID uuid.UUID, search string, page, perPage int) (*dto.RepositoryListResponse, error) {
+	repos, total, err := s.repoRepo.ListByUserTeams(ctx, userID, search, page, perPage)
+	if err != nil {
+		return nil, fmt.Errorf("list all repositories: %w", err)
+	}
+
+	items := make([]dto.RepositoryResponse, len(repos))
+	for i, r := range repos {
+		items[i] = dto.NewRepositoryResponse(&r, "")
+	}
+
+	totalPages := total / perPage
+	if total%perPage != 0 {
+		totalPages++
+	}
+
+	return &dto.RepositoryListResponse{
+		Repositories: items,
+		Meta: dto.PaginationMeta{
+			Page:       page,
+			PerPage:    perPage,
+			Total:      total,
+			TotalPages: totalPages,
+		},
+	}, nil
+}
+
 func (s *RepositoryService) GetRepository(ctx context.Context, userID, repoID uuid.UUID) (*dto.RepositoryResponse, error) {
 	repo, err := s.repoRepo.GetByID(ctx, repoID)
 	if err != nil {

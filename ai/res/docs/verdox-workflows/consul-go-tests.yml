@@ -1,0 +1,652 @@
+# Verdox CI Workflow for hashicorp/consul — Go Tests
+# Mirrors go-tests.yml structure for the open-source (CE) test suites.
+#
+# Each job runs go test -json for its package scope, uploads parsed results,
+# then verdox-report collects everything into a single hierarchical payload.
+#
+# NOTE: This does NOT use consul's reusable workflows (reusable-unit-split.yml etc.)
+# since those are designed for the upstream repo. Instead, each job runs
+# go test directly with the appropriate directory/flags.
+
+name: "verdox: go-tests"
+
+on:
+  workflow_dispatch:
+    inputs:
+      verdox_run_id:
+        description: 'Verdox test run ID'
+        required: true
+      branch:
+        description: 'Branch to test'
+        required: true
+      commit_hash:
+        description: 'Commit hash to test'
+        required: true
+      callback_url:
+        description: 'Webhook callback URL'
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  GOPRIVATE: github.com/hashicorp
+  GO_VERSION: "1.25.8"
+
+jobs:
+
+  # ──────────────────────────────────────────────
+  # 1. Lint (golangci-lint)
+  # ──────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+        continue-on-error: true
+
+  # ──────────────────────────────────────────────
+  # 2. Unit Tests — CE (main module, excluding api/sdk/envoyextensions)
+  # ──────────────────────────────────────────────
+  go-test-ce:
+    name: Unit Tests (CE)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        run: |
+          set +e
+          go test -json -count=1 -timeout 20m ./... 2>&1 | tee test-output.json
+          exit 0
+      - name: Parse test results
+        if: always()
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests = {}
+          pkg_durations = {}
+          try:
+              with open("test-output.json", "r") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test = ev.get("Test", "")
+                      pkg = ev.get("Package", "")
+                      action = ev.get("Action", "")
+                      if not test and pkg and action in ("pass", "fail"):
+                          pkg_durations[pkg] = ev.get("Elapsed", 0)
+                          continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests:
+                          tests[key] = {"name": test, "package": pkg, "status": "", "duration_s": 0, "output": [], "error": ""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output", ""))
+                      elif action == "pass":
+                          t["status"] = "passed"
+                          t["duration_s"] = ev.get("Elapsed", 0)
+                      elif action == "fail":
+                          t["status"] = "failed"
+                          t["duration_s"] = ev.get("Elapsed", 0)
+                          t["error"] = "".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"] = "skipped"
+          except Exception as e:
+              print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              pkg = t["package"]
+              if pkg not in packages: packages[pkg] = []
+              packages[pkg].append(t)
+          result = {"packages": {}, "pkg_durations": pkg_durations}
+          for pkg, cases in packages.items():
+              result["packages"][pkg] = [{"name": c["name"], "status": c["status"], "duration_seconds": c["duration_s"], "error_message": c["error"]} for c in cases]
+          with open("verdox-test-results.json", "w") as f:
+              json.dump(result, f)
+          total = sum(len(v) for v in result["packages"].values())
+          print(f"Verdox: parsed {total} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-ce-results
+          path: verdox-test-results.json
+
+  # ──────────────────────────────────────────────
+  # 3. Race Detection Tests
+  # ──────────────────────────────────────────────
+  go-test-race:
+    name: Race Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run race tests
+        run: |
+          set +e
+          # Exclude heavy packages (same as consul's go-tests.yml)
+          PKGS=$(go list ./... | grep -E -v '^github.com/hashicorp/consul/agent(/consul|/local|/routine-leak-checker)?$' | grep -E -v '^github.com/hashicorp/consul(/command|/connect|/snapshot)')
+          go test -json -race -gcflags=all=-d=checkptr=0 -count=1 -timeout 30m $PKGS 2>&1 | tee test-output.json
+          exit 0
+      - name: Parse test results
+        if: always()
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests = {}
+          pkg_durations = {}
+          try:
+              with open("test-output.json", "r") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test = ev.get("Test", "")
+                      pkg = ev.get("Package", "")
+                      action = ev.get("Action", "")
+                      if not test and pkg and action in ("pass", "fail"):
+                          pkg_durations[pkg] = ev.get("Elapsed", 0)
+                          continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests:
+                          tests[key] = {"name": test, "package": pkg, "status": "", "duration_s": 0, "output": [], "error": ""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output", ""))
+                      elif action == "pass":
+                          t["status"] = "passed"
+                          t["duration_s"] = ev.get("Elapsed", 0)
+                      elif action == "fail":
+                          t["status"] = "failed"
+                          t["duration_s"] = ev.get("Elapsed", 0)
+                          t["error"] = "".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"] = "skipped"
+          except Exception as e:
+              print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              pkg = t["package"]
+              if pkg not in packages: packages[pkg] = []
+              packages[pkg].append(t)
+          result = {"packages": {}, "pkg_durations": pkg_durations}
+          for pkg, cases in packages.items():
+              result["packages"][pkg] = [{"name": c["name"], "status": c["status"], "duration_seconds": c["duration_s"], "error_message": c["error"]} for c in cases]
+          with open("verdox-test-results.json", "w") as f:
+              json.dump(result, f)
+          total = sum(len(v) for v in result["packages"].values())
+          print(f"Verdox: parsed {total} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-race-results
+          path: verdox-test-results.json
+
+  # ──────────────────────────────────────────────
+  # 4. API Module Tests
+  # ──────────────────────────────────────────────
+  go-test-api:
+    name: API Module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        working-directory: api
+        run: |
+          set +e
+          go test -json -count=1 -timeout 10m ./... 2>&1 | tee test-output.json
+          exit 0
+      - name: Parse test results
+        if: always()
+        working-directory: api
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests, pkg_durations = {}, {}
+          try:
+              with open("test-output.json") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test, pkg, action = ev.get("Test",""), ev.get("Package",""), ev.get("Action","")
+                      if not test and pkg and action in ("pass","fail"): pkg_durations[pkg] = ev.get("Elapsed",0); continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests: tests[key] = {"name":test,"package":pkg,"status":"","duration_s":0,"output":[],"error":""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output",""))
+                      elif action == "pass": t["status"]="passed"; t["duration_s"]=ev.get("Elapsed",0)
+                      elif action == "fail": t["status"]="failed"; t["duration_s"]=ev.get("Elapsed",0); t["error"]="".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"]="skipped"
+          except Exception as e: print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              packages.setdefault(t["package"],[]).append(t)
+          result = {"packages": {p: [{"name":c["name"],"status":c["status"],"duration_seconds":c["duration_s"],"error_message":c["error"]} for c in cs] for p, cs in packages.items()}, "pkg_durations": pkg_durations}
+          with open("verdox-test-results.json","w") as f: json.dump(result, f)
+          print(f"Verdox: {sum(len(v) for v in result['packages'].values())} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-test-api-results
+          path: api/verdox-test-results.json
+
+  # ──────────────────────────────────────────────
+  # 5. SDK Module Tests
+  # ──────────────────────────────────────────────
+  go-test-sdk:
+    name: SDK Module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        working-directory: sdk
+        run: |
+          set +e
+          go test -json -count=1 -timeout 10m ./... 2>&1 | tee test-output.json
+          exit 0
+      - name: Parse test results
+        if: always()
+        working-directory: sdk
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests, pkg_durations = {}, {}
+          try:
+              with open("test-output.json") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test, pkg, action = ev.get("Test",""), ev.get("Package",""), ev.get("Action","")
+                      if not test and pkg and action in ("pass","fail"): pkg_durations[pkg] = ev.get("Elapsed",0); continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests: tests[key] = {"name":test,"package":pkg,"status":"","duration_s":0,"output":[],"error":""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output",""))
+                      elif action == "pass": t["status"]="passed"; t["duration_s"]=ev.get("Elapsed",0)
+                      elif action == "fail": t["status"]="failed"; t["duration_s"]=ev.get("Elapsed",0); t["error"]="".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"]="skipped"
+          except Exception as e: print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              packages.setdefault(t["package"],[]).append(t)
+          result = {"packages": {p: [{"name":c["name"],"status":c["status"],"duration_seconds":c["duration_s"],"error_message":c["error"]} for c in cs] for p, cs in packages.items()}, "pkg_durations": pkg_durations}
+          with open("verdox-test-results.json","w") as f: json.dump(result, f)
+          print(f"Verdox: {sum(len(v) for v in result['packages'].values())} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-test-sdk-results
+          path: sdk/verdox-test-results.json
+
+  # ──────────────────────────────────────────────
+  # 6. Envoy Extensions Tests
+  # ──────────────────────────────────────────────
+  go-test-envoyextensions:
+    name: Envoy Extensions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        working-directory: envoyextensions
+        run: |
+          set +e
+          go test -json -count=1 -timeout 10m ./... 2>&1 | tee test-output.json
+          exit 0
+      - name: Parse test results
+        if: always()
+        working-directory: envoyextensions
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests, pkg_durations = {}, {}
+          try:
+              with open("test-output.json") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test, pkg, action = ev.get("Test",""), ev.get("Package",""), ev.get("Action","")
+                      if not test and pkg and action in ("pass","fail"): pkg_durations[pkg] = ev.get("Elapsed",0); continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests: tests[key] = {"name":test,"package":pkg,"status":"","duration_s":0,"output":[],"error":""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output",""))
+                      elif action == "pass": t["status"]="passed"; t["duration_s"]=ev.get("Elapsed",0)
+                      elif action == "fail": t["status"]="failed"; t["duration_s"]=ev.get("Elapsed",0); t["error"]="".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"]="skipped"
+          except Exception as e: print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              packages.setdefault(t["package"],[]).append(t)
+          result = {"packages": {p: [{"name":c["name"],"status":c["status"],"duration_seconds":c["duration_s"],"error_message":c["error"]} for c in cs] for p, cs in packages.items()}, "pkg_durations": pkg_durations}
+          with open("verdox-test-results.json","w") as f: json.dump(result, f)
+          print(f"Verdox: {sum(len(v) for v in result['packages'].values())} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-test-envoyextensions-results
+          path: envoyextensions/verdox-test-results.json
+
+  # ──────────────────────────────────────────────
+  # 7. Troubleshoot Tests
+  # ──────────────────────────────────────────────
+  go-test-troubleshoot:
+    name: Troubleshoot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        working-directory: troubleshoot
+        run: |
+          set +e
+          go test -json -count=1 -timeout 10m ./... 2>&1 | tee test-output.json
+          exit 0
+      - name: Parse test results
+        if: always()
+        working-directory: troubleshoot
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests, pkg_durations = {}, {}
+          try:
+              with open("test-output.json") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test, pkg, action = ev.get("Test",""), ev.get("Package",""), ev.get("Action","")
+                      if not test and pkg and action in ("pass","fail"): pkg_durations[pkg] = ev.get("Elapsed",0); continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests: tests[key] = {"name":test,"package":pkg,"status":"","duration_s":0,"output":[],"error":""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output",""))
+                      elif action == "pass": t["status"]="passed"; t["duration_s"]=ev.get("Elapsed",0)
+                      elif action == "fail": t["status"]="failed"; t["duration_s"]=ev.get("Elapsed",0); t["error"]="".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"]="skipped"
+          except Exception as e: print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              packages.setdefault(t["package"],[]).append(t)
+          result = {"packages": {p: [{"name":c["name"],"status":c["status"],"duration_seconds":c["duration_s"],"error_message":c["error"]} for c in cs] for p, cs in packages.items()}, "pkg_durations": pkg_durations}
+          with open("verdox-test-results.json","w") as f: json.dump(result, f)
+          print(f"Verdox: {sum(len(v) for v in result['packages'].values())} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-test-troubleshoot-results
+          path: troubleshoot/verdox-test-results.json
+
+  # ──────────────────────────────────────────────
+  # 8. Testing Deployer Tests
+  # ──────────────────────────────────────────────
+  go-test-deployer:
+    name: Testing Deployer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        working-directory: testing/deployer
+        run: |
+          set +e
+          go test -json -count=1 -timeout 10m ./... 2>&1 | tee test-output.json
+          exit 0
+      - name: Parse test results
+        if: always()
+        working-directory: testing/deployer
+        run: |
+          python3 << 'VERDOX_PARSER'
+          import json, sys
+          tests, pkg_durations = {}, {}
+          try:
+              with open("test-output.json") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line: continue
+                      try: ev = json.loads(line)
+                      except: continue
+                      test, pkg, action = ev.get("Test",""), ev.get("Package",""), ev.get("Action","")
+                      if not test and pkg and action in ("pass","fail"): pkg_durations[pkg] = ev.get("Elapsed",0); continue
+                      if not test: continue
+                      key = f"{pkg}/{test}"
+                      if key not in tests: tests[key] = {"name":test,"package":pkg,"status":"","duration_s":0,"output":[],"error":""}
+                      t = tests[key]
+                      if action == "output": t["output"].append(ev.get("Output",""))
+                      elif action == "pass": t["status"]="passed"; t["duration_s"]=ev.get("Elapsed",0)
+                      elif action == "fail": t["status"]="failed"; t["duration_s"]=ev.get("Elapsed",0); t["error"]="".join(t["output"])[-3000:]
+                      elif action == "skip": t["status"]="skipped"
+          except Exception as e: print(f"Warning: {e}", file=sys.stderr)
+          packages = {}
+          for key, t in tests.items():
+              if not t["status"]: continue
+              packages.setdefault(t["package"],[]).append(t)
+          result = {"packages": {p: [{"name":c["name"],"status":c["status"],"duration_seconds":c["duration_s"],"error_message":c["error"]} for c in cs] for p, cs in packages.items()}, "pkg_durations": pkg_durations}
+          with open("verdox-test-results.json","w") as f: json.dump(result, f)
+          print(f"Verdox: {sum(len(v) for v in result['packages'].values())} tests across {len(result['packages'])} packages")
+          VERDOX_PARSER
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-test-deployer-results
+          path: testing/deployer/verdox-test-results.json
+
+  # ══════════════════════════════════════════════
+  # VERDOX REPORT — collects all job results
+  # ══════════════════════════════════════════════
+  verdox-report:
+    name: Verdox Report
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - lint
+      - go-test-ce
+      - go-test-race
+      - go-test-api
+      - go-test-sdk
+      - go-test-envoyextensions
+      - go-test-troubleshoot
+      - go-test-deployer
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+        continue-on-error: true
+
+      - name: Build Verdox report
+        env:
+          VERDOX_RUN_ID: ${{ github.event.inputs.verdox_run_id }}
+          VERDOX_REPO: ${{ github.repository }}
+          VERDOX_BRANCH: ${{ github.event.inputs.branch }}
+          VERDOX_COMMIT: ${{ github.event.inputs.commit_hash }}
+          VERDOX_SUITES: |
+            [
+              {"id": "lint", "name": "Lint", "type": "lint", "result": "${{ needs.lint.result }}"},
+              {"id": "go-test-ce", "name": "Unit Tests (CE)", "type": "unit", "result": "${{ needs.go-test-ce.result }}", "results_file": "artifacts/go-test-ce-results/verdox-test-results.json"},
+              {"id": "go-test-race", "name": "Race Detection", "type": "race", "result": "${{ needs.go-test-race.result }}", "results_file": "artifacts/go-test-race-results/verdox-test-results.json"},
+              {"id": "go-test-api", "name": "API Module", "type": "unit", "result": "${{ needs.go-test-api.result }}", "results_file": "artifacts/go-test-api-results/verdox-test-results.json"},
+              {"id": "go-test-sdk", "name": "SDK Module", "type": "unit", "result": "${{ needs.go-test-sdk.result }}", "results_file": "artifacts/go-test-sdk-results/verdox-test-results.json"},
+              {"id": "go-test-envoyextensions", "name": "Envoy Extensions", "type": "unit", "result": "${{ needs.go-test-envoyextensions.result }}", "results_file": "artifacts/go-test-envoyextensions-results/verdox-test-results.json"},
+              {"id": "go-test-troubleshoot", "name": "Troubleshoot", "type": "unit", "result": "${{ needs.go-test-troubleshoot.result }}", "results_file": "artifacts/go-test-troubleshoot-results/verdox-test-results.json"},
+              {"id": "go-test-deployer", "name": "Testing Deployer", "type": "unit", "result": "${{ needs.go-test-deployer.result }}", "results_file": "artifacts/go-test-deployer-results/verdox-test-results.json"}
+            ]
+        run: |
+          python3 << 'VERDOX_REPORT'
+          import json, os, sys
+          from datetime import datetime, timezone
+
+          run_id = os.environ.get("VERDOX_RUN_ID", "")
+          repo = os.environ.get("VERDOX_REPO", "")
+          branch = os.environ.get("VERDOX_BRANCH", "")
+          commit = os.environ.get("VERDOX_COMMIT", "")
+          suites_config = json.loads(os.environ.get("VERDOX_SUITES", "[]"))
+
+          suites = []
+          all_cases = all_passed = all_failed = all_skipped = 0
+          all_duration = 0.0
+
+          for sc in suites_config:
+              suite_id = sc["id"]
+              suite_name = sc["name"]
+              suite_type = sc["type"]
+              job_result = sc.get("result", "success")
+              results_file = sc.get("results_file", "")
+
+              tests = []
+              s_passed = s_failed = s_skipped = s_total = 0
+              s_duration = 0.0
+
+              if results_file and os.path.exists(results_file):
+                  with open(results_file) as f:
+                      data = json.load(f)
+                  pkg_dur = data.get("pkg_durations", {})
+                  for pkg, cases in data.get("packages", {}).items():
+                      pkg_slug = pkg.replace("/", "-").replace(".", "-")[-60:]
+                      pkg_name = pkg.split("/")[-1] if "/" in pkg else pkg
+                      pkg_elapsed = pkg_dur.get(pkg, 0)
+                      test_cases = []
+                      t_p = t_f = t_s = 0
+                      t_dur = 0.0
+                      for c in cases:
+                          st = c.get("status", "unknown")
+                          dur = c.get("duration_seconds", 0)
+                          tc = {"case_id": c["name"], "name": c["name"], "status": st, "duration_seconds": dur}
+                          if c.get("error_message"): tc["error_message"] = c["error_message"]
+                          test_cases.append(tc)
+                          if st == "passed": t_p += 1
+                          elif st == "failed": t_f += 1
+                          elif st == "skipped": t_s += 1
+                          t_dur += dur
+                      if pkg_elapsed > t_dur: t_dur = pkg_elapsed
+                      t_total = len(test_cases)
+                      t_status = "failed" if t_f > 0 else "passed"
+                      t_rate = round(t_p / t_total * 100, 2) if t_total > 0 else 0
+                      tests.append({
+                          "test_id": pkg_slug, "name": pkg_name, "package": pkg,
+                          "status": t_status,
+                          "stats": {"total": t_total, "passed": t_p, "failed": t_f, "skipped": t_s, "duration_seconds": round(t_dur, 2), "pass_rate": t_rate},
+                          "cases": test_cases
+                      })
+                      s_passed += t_p; s_failed += t_f; s_skipped += t_s
+                      s_total += t_total; s_duration += t_dur
+              else:
+                  st = "passed" if job_result == "success" else "failed"
+                  tests.append({
+                      "test_id": suite_id, "name": suite_name, "package": "",
+                      "status": st,
+                      "stats": {"total": 1, "passed": 1 if st == "passed" else 0, "failed": 1 if st == "failed" else 0, "skipped": 0, "duration_seconds": 0, "pass_rate": 100 if st == "passed" else 0},
+                      "cases": [{"case_id": suite_id, "name": suite_name, "status": st, "duration_seconds": 0}]
+                  })
+                  s_total = 1
+                  if st == "passed": s_passed = 1
+                  else: s_failed = 1
+
+              suite_status = "failed" if s_failed > 0 else "passed"
+              suite_rate = round(s_passed / s_total * 100, 2) if s_total > 0 else 0
+              suites.append({
+                  "job_id": suite_id, "name": suite_name, "type": suite_type,
+                  "status": suite_status,
+                  "stats": {"total": s_total, "passed": s_passed, "failed": s_failed, "skipped": s_skipped, "duration_seconds": round(s_duration, 2), "pass_rate": suite_rate},
+                  "tests": tests
+              })
+              all_cases += s_total; all_passed += s_passed; all_failed += s_failed
+              all_skipped += s_skipped; all_duration += s_duration
+
+          all_rate = round(all_passed / all_cases * 100, 2) if all_cases > 0 else 0
+          payload = {
+              "repo": repo, "run_id": run_id, "branch": branch, "commit_sha": commit,
+              "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "summary": {
+                  "total_jobs": len(suites),
+                  "total_tests": sum(len(s["tests"]) for s in suites),
+                  "total_cases": all_cases,
+                  "passed": all_passed, "failed": all_failed, "skipped": all_skipped,
+                  "duration_seconds": round(all_duration, 2), "pass_rate": all_rate
+              },
+              "jobs": suites
+          }
+          with open("verdox-results.json", "w") as f:
+              json.dump(payload, f, indent=2)
+          print(f"Verdox: {len(suites)} jobs, {all_cases} cases ({all_passed}P/{all_failed}F/{all_skipped}S)")
+          VERDOX_REPORT
+
+      - name: Upload Verdox results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdox-results
+          path: verdox-results.json
+          retention-days: 7
+
+      - name: Callback to Verdox
+        if: always() && github.event.inputs.callback_url != ''
+        run: |
+          curl -s -X POST "${{ github.event.inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -d @verdox-results.json || true

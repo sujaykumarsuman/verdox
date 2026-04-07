@@ -103,8 +103,10 @@ func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	userRepo := repository.NewUserRepository(db)
 	forkSvc := service.NewForkService(cfg, db, log)
 
+	groupRepo := repository.NewTestGroupRepository(db)
+
 	suiteService := service.NewTestSuiteService(suiteRepo, repoRepo, teamMemberRepo, forkSvc, log)
-	runService := service.NewTestRunService(runRepo, resultRepo, suiteRepo, repoRepo, teamMemberRepo, userRepo, q, rdb, cfg, log)
+	runService := service.NewTestRunService(runRepo, resultRepo, suiteRepo, repoRepo, teamMemberRepo, userRepo, groupRepo, q, rdb, cfg, log)
 
 	suiteHandler := handler.NewTestSuiteHandler(suiteService)
 	runHandler := handler.NewTestRunHandler(runService)
@@ -119,6 +121,7 @@ func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 
 	// Suite-level routes under /v1/suites
 	suites := e.Group("/v1/suites", authMiddleware)
+	suites.GET("/:id", suiteHandler.Get)
 	suites.PUT("/:id", suiteHandler.Update)
 	suites.DELETE("/:id", suiteHandler.Delete)
 	suites.POST("/:id/run", runHandler.Trigger)
@@ -131,14 +134,42 @@ func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	runs.POST("/:id/cancel", runHandler.Cancel)
 }
 
-func registerWebhookRoutes(e *echo.Echo, db *sqlx.DB) {
+func registerWebhookRoutes(e *echo.Echo, db *sqlx.DB, log zerolog.Logger) {
 	runRepo := repository.NewTestRunRepository(db)
 	resultRepo := repository.NewTestResultRepository(db)
-	webhookHandler := handler.NewWebhookHandler(runRepo, resultRepo)
+	suiteRepo := repository.NewTestSuiteRepository(db)
+	groupRepo := repository.NewTestGroupRepository(db)
+	caseRepo := repository.NewTestCaseRepository(db)
+	repoRepo := repository.NewRepositoryRepository(db)
+
+	ingestionSvc := service.NewIngestionService(suiteRepo, runRepo, groupRepo, caseRepo, repoRepo, log)
+	webhookHandler := handler.NewWebhookHandler(runRepo, resultRepo, ingestionSvc)
 
 	// No auth — run_id UUID acts as bearer token
 	webhooks := e.Group("/v1/webhooks")
 	webhooks.POST("/gha/:run_id", webhookHandler.GHACallback)
+	webhooks.POST("/ingest", webhookHandler.Ingest)
+}
+
+func registerHierarchyRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	userRepo := repository.NewUserRepository(db)
+	runRepo := repository.NewTestRunRepository(db)
+	groupRepo := repository.NewTestGroupRepository(db)
+	caseRepo := repository.NewTestCaseRepository(db)
+
+	hierarchyHandler := handler.NewHierarchyHandler(runRepo, groupRepo, caseRepo)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+
+	// Hierarchy endpoints under /v1/runs (authenticated)
+	runs := e.Group("/v1/runs", authMiddleware)
+	runs.GET("/:id/groups", hierarchyHandler.ListGroups)
+	runs.GET("/:id/groups/:groupId/cases", hierarchyHandler.ListGroupCases)
+	runs.GET("/:id/cases/failed", hierarchyHandler.ListFailedCases)
+
+	// Report endpoint (authenticated)
+	reports := e.Group("/v1/reports", authMiddleware)
+	reports.GET("/:reportId", hierarchyHandler.GetReport)
 }
 
 func registerDiscoveryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {

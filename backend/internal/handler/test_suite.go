@@ -61,6 +61,22 @@ func (h *TestSuiteHandler) List(c echo.Context) error {
 	return response.Success(c, http.StatusOK, resp)
 }
 
+// Get handles GET /v1/suites/:id
+func (h *TestSuiteHandler) Get(c echo.Context) error {
+	suiteID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid suite ID")
+	}
+
+	userID := mw.GetUserID(c)
+	resp, err := h.suiteService.GetSuite(c.Request().Context(), userID, suiteID)
+	if err != nil {
+		return h.mapError(c, err)
+	}
+
+	return response.Success(c, http.StatusOK, resp)
+}
+
 // Update handles PUT /v1/suites/:id
 func (h *TestSuiteHandler) Update(c echo.Context) error {
 	suiteID, err := uuid.Parse(c.Param("id"))

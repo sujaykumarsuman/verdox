@@ -90,7 +90,7 @@ export default function SettingsPage() {
 
   if (authLoading) {
     return (
-      <div className="max-w-2xl">
+      <div className="max-w-2xl mx-auto">
         <Skeleton className="h-9 w-32 mb-2" />
         <Skeleton className="h-5 w-64 mb-8" />
         <div className="space-y-6">
@@ -106,7 +106,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl mx-auto">
       <div className="mb-6">
         <h1 className="font-display text-[30px] leading-[38px] tracking-[-0.01em] text-text-primary mb-1">
           Settings
