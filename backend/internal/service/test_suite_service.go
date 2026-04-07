@@ -21,6 +21,7 @@ type TestSuiteService struct {
 	suiteRepo      repository.TestSuiteRepository
 	repoRepo       repository.RepositoryRepository
 	teamMemberRepo repository.TeamMemberRepository
+	forkService    *ForkService
 	log            zerolog.Logger
 }
 
@@ -28,12 +29,14 @@ func NewTestSuiteService(
 	suiteRepo repository.TestSuiteRepository,
 	repoRepo repository.RepositoryRepository,
 	teamMemberRepo repository.TeamMemberRepository,
+	forkService *ForkService,
 	log zerolog.Logger,
 ) *TestSuiteService {
 	return &TestSuiteService{
 		suiteRepo:      suiteRepo,
 		repoRepo:       repoRepo,
 		teamMemberRepo: teamMemberRepo,
+		forkService:    forkService,
 		log:            log,
 	}
 }
@@ -48,9 +51,14 @@ func (s *TestSuiteService) CreateSuite(ctx context.Context, userID, repoID uuid.
 		timeout = *req.TimeoutSeconds
 	}
 
-	execMode := model.ExecutionModeContainer
+	execMode := model.ExecutionModeForkGHA
 	if req.ExecutionMode != "" {
 		execMode = req.ExecutionMode
+	}
+
+	var wfConfig model.WorkflowConfigJSON
+	if req.WorkflowConfig != nil {
+		wfConfig = model.WorkflowConfigJSON(*req.WorkflowConfig)
 	}
 
 	suite := &model.TestSuite{
@@ -64,10 +72,20 @@ func (s *TestSuiteService) CreateSuite(ctx context.Context, userID, repoID uuid.
 		EnvVars:        model.EnvVarsMap(req.EnvVars),
 		ConfigPath:     req.ConfigPath,
 		TimeoutSeconds: timeout,
+		WorkflowConfig: wfConfig,
 	}
 
 	if err := s.suiteRepo.Create(ctx, suite); err != nil {
 		return nil, fmt.Errorf("create test suite: %w", err)
+	}
+
+	// Push updated workflow files to fork (async — don't block response)
+	if s.forkService != nil {
+		go func() {
+			if err := s.forkService.RefreshSuiteWorkflows(context.Background(), repoID); err != nil {
+				s.log.Error().Err(err).Str("repo_id", repoID.String()).Msg("failed to refresh suite workflows after create")
+			}
+		}()
 	}
 
 	resp := dto.NewTestSuiteResponse(suite)
@@ -136,6 +154,15 @@ func (s *TestSuiteService) UpdateSuite(ctx context.Context, userID, suiteID uuid
 		return nil, fmt.Errorf("update test suite: %w", err)
 	}
 
+	// Push updated workflow files to fork (async)
+	if s.forkService != nil {
+		go func() {
+			if err := s.forkService.RefreshSuiteWorkflows(context.Background(), suite.RepositoryID); err != nil {
+				s.log.Error().Err(err).Str("suite_id", suiteID.String()).Msg("failed to refresh suite workflows after update")
+			}
+		}()
+	}
+
 	resp := dto.NewTestSuiteResponse(suite)
 	return &resp, nil
 }
@@ -162,7 +189,20 @@ func (s *TestSuiteService) DeleteSuite(ctx context.Context, userID, suiteID uuid
 		return ErrNotTeamAdmin
 	}
 
-	return s.suiteRepo.Delete(ctx, suiteID)
+	if err := s.suiteRepo.Delete(ctx, suiteID); err != nil {
+		return fmt.Errorf("delete test suite: %w", err)
+	}
+
+	// Push updated workflow files to fork (removes deleted suite's workflow)
+	if s.forkService != nil {
+		go func() {
+			if err := s.forkService.RefreshSuiteWorkflows(context.Background(), suite.RepositoryID); err != nil {
+				s.log.Error().Err(err).Str("suite_id", suiteID.String()).Msg("failed to refresh suite workflows after delete")
+			}
+		}()
+	}
+
+	return nil
 }
 
 // verifyAdminOrMaintainer checks that the user is an admin or maintainer of the repo's team.

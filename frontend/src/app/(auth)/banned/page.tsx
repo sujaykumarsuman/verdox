@@ -13,6 +13,9 @@ interface BanInfo {
   reviewsRemaining: number;
   login: string;
   password: string;
+  email?: string;
+  username?: string;
+  ban_reason?: string; // from SSE forceBan path
 }
 
 export default function BannedPage() {
@@ -33,12 +36,27 @@ export default function BannedPage() {
     try {
       const raw = sessionStorage.getItem("verdox_ban_info");
       if (raw) {
-        setBanInfo(JSON.parse(raw));
+        const parsed = JSON.parse(raw);
+        // Normalize: SSE path stores ban_reason, login path stores reason
+        if (parsed.ban_reason && !parsed.reason) {
+          parsed.reason = parsed.ban_reason;
+        }
+        setBanInfo(parsed);
       }
     } catch {
       // No ban info available
     }
   }, []);
+
+  const handleBackToSignIn = () => {
+    // Clear all auth state and ban info before navigating
+    sessionStorage.removeItem("verdox_ban_info");
+    // Force-clear cookies by calling logout
+    fetch(`${API_BASE}/v1/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
+  };
 
   const handleSubmitReview = async () => {
     if (!banInfo || !clarification.trim()) return;
@@ -104,6 +122,10 @@ export default function BannedPage() {
         </p>
         <Link
           href="/login"
+          onClick={() => {
+            sessionStorage.removeItem("verdox_ban_info");
+            fetch(`${API_BASE}/v1/auth/logout`, { method: "POST", credentials: "include" }).catch(() => {});
+          }}
           className="text-[14px] text-accent hover:text-accent-light font-medium"
         >
           Go to Sign In
@@ -122,6 +144,11 @@ export default function BannedPage() {
         <p className="text-[14px] text-text-secondary">
           Your account has been suspended by an administrator.
         </p>
+        {(banInfo.email || banInfo.username || banInfo.login) && (
+          <p className="text-[13px] text-text-secondary mt-1">
+            Account: {banInfo.email || banInfo.username || banInfo.login}
+          </p>
+        )}
       </div>
 
       {/* Ban reason */}
@@ -207,6 +234,7 @@ export default function BannedPage() {
       <div className="text-center pt-2">
         <Link
           href="/login"
+          onClick={handleBackToSignIn}
           className="text-[14px] text-accent hover:text-accent-light font-medium"
         >
           Back to Sign In

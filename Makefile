@@ -37,7 +37,7 @@ dev: ## Start full stack with hot reload (docker-compose.dev.yml)
 	@echo "Running migrations..."
 	@$(MIGRATE) -path $(MIGRATION_DIR) -database "$(MIGRATE_DB_URL)" up || true
 	@echo "Starting all services..."
-	$(COMPOSE_DEV) up --build
+	$(COMPOSE_DEV) up -d --build
 
 dev-backend: ## Start backend only with air (Go hot reload)
 	cd backend && go install github.com/air-verse/air@latest && air -c .air.toml
@@ -64,8 +64,9 @@ build-frontend: ## Build frontend Docker image
 up: ## Start the production stack (detached)
 	$(COMPOSE) up -d --build
 
-down: ## Stop and remove all containers
-	$(COMPOSE) down
+down: ## Stop and remove all containers and volumes
+	$(COMPOSE) down -v
+# 	@docker volume prune -f > /dev/null 2>&1 || true
 
 logs: ## Tail logs for all services (Ctrl+C to stop)
 	$(COMPOSE) logs -f

@@ -15,6 +15,7 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/dto"
 	"github.com/sujaykumarsuman/verdox/backend/internal/model"
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
+	"github.com/sujaykumarsuman/verdox/backend/internal/sse"
 )
 
 var (
@@ -37,6 +38,7 @@ type AdminService struct {
 	banReviewRepo  repository.BanReviewRepository
 	teamMemberRepo repository.TeamMemberRepository
 	teamRepo       repository.TeamRepository
+	notifService   *NotificationService
 	rdb            *redis.Client
 	db             *sqlx.DB
 	log            zerolog.Logger
@@ -48,6 +50,7 @@ func NewAdminService(
 	banReviewRepo repository.BanReviewRepository,
 	teamMemberRepo repository.TeamMemberRepository,
 	teamRepo repository.TeamRepository,
+	notifService *NotificationService,
 	rdb *redis.Client,
 	db *sqlx.DB,
 	log zerolog.Logger,
@@ -58,6 +61,7 @@ func NewAdminService(
 		banReviewRepo:  banReviewRepo,
 		teamMemberRepo: teamMemberRepo,
 		teamRepo:       teamRepo,
+		notifService:   notifService,
 		rdb:            rdb,
 		db:             db,
 		log:            log,
@@ -215,6 +219,21 @@ func (s *AdminService) UpdateUser(ctx context.Context, callerID uuid.UUID, calle
 			sessionKey := fmt.Sprintf("session:%s", targetID.String())
 			s.rdb.Del(ctx, sessionKey)
 
+			// Push SSE event to the banned user for immediate redirect
+			_ = sse.PublishEvent(ctx, s.rdb, targetID, sse.EventBanned, map[string]string{
+				"reason": *req.BanReason,
+			})
+
+			// Create notification for the banned user (visible after unban)
+			if s.notifService != nil {
+				_ = s.notifService.CreateAndPublish(ctx, &model.Notification{
+					UserID:  targetID,
+					Type:    model.NotificationSystem,
+					Subject: "Your account has been banned",
+					Body:    fmt.Sprintf("Reason: %s", *req.BanReason),
+				})
+			}
+
 			s.log.Info().
 				Str("caller_id", callerID.String()).
 				Str("target_id", targetID.String()).
@@ -225,6 +244,10 @@ func (s *AdminService) UpdateUser(ctx context.Context, callerID uuid.UUID, calle
 			}
 			// Clear ban reviews so the user gets fresh attempts if banned again
 			_ = s.banReviewRepo.DeleteByUser(ctx, targetID)
+
+			// Push SSE event to the unbanned user
+			_ = sse.PublishEvent(ctx, s.rdb, targetID, sse.EventUnbanned, nil)
+
 			s.log.Info().
 				Str("caller_id", callerID.String()).
 				Str("target_id", targetID.String()).
@@ -349,12 +372,34 @@ func (s *AdminService) ReviewBan(ctx context.Context, callerID uuid.UUID, review
 		}
 		// Clear all ban reviews for fresh attempts if banned again
 		_ = s.banReviewRepo.DeleteByUser(ctx, review.UserID)
+
+		// Notify the user their review was approved
+		_ = sse.PublishEvent(ctx, s.rdb, review.UserID, sse.EventUnbanned, nil)
+		if s.notifService != nil {
+			_ = s.notifService.CreateAndPublish(ctx, &model.Notification{
+				UserID:  review.UserID,
+				Type:    model.NotificationSystem,
+				Subject: "Your ban appeal has been approved",
+				Body:    "Your account has been unbanned. You can now log in again.",
+			})
+		}
+
 		s.log.Info().
 			Str("caller_id", callerID.String()).
 			Str("review_id", reviewID.String()).
 			Str("user_id", review.UserID.String()).
 			Msg("admin: ban review approved, user unbanned")
 	} else {
+		// Notify the user their review was denied
+		if s.notifService != nil {
+			_ = s.notifService.CreateAndPublish(ctx, &model.Notification{
+				UserID:  review.UserID,
+				Type:    model.NotificationSystem,
+				Subject: "Your ban appeal has been denied",
+				Body:    "An administrator has reviewed and denied your ban appeal.",
+			})
+		}
+
 		s.log.Info().
 			Str("caller_id", callerID.String()).
 			Str("review_id", reviewID.String()).

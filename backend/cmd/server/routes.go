@@ -22,10 +22,12 @@ func registerTeamRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	teamRepoRepo := repository.NewTeamRepoAssignmentRepository(db)
 	repoRepo := repository.NewRepositoryRepository(db)
 	userRepo := repository.NewUserRepository(db)
+	notifRepo := repository.NewNotificationRepository(db)
 
 	// Services
 	githubService := service.NewGitHubService(log)
-	teamService := service.NewTeamService(teamRepo, memberRepo, joinReqRepo, teamRepoRepo, repoRepo, log)
+	notifService := service.NewNotificationService(notifRepo, userRepo, rdb, log)
+	teamService := service.NewTeamService(teamRepo, memberRepo, joinReqRepo, teamRepoRepo, repoRepo, userRepo, notifService, log)
 
 	// Handler
 	teamHandler := handler.NewTeamHandler(teamService, teamRepo, memberRepo, githubService, cfg, log)
@@ -68,14 +70,16 @@ func registerTeamRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	teams.PATCH("/:id/join-requests/:requestId", teamHandler.ReviewJoinRequest, requireAdminMaintainer)
 }
 
-func registerRepositoryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger, cloneCh chan<- service.CloneJob) {
+func registerRepositoryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
 	repoRepo := repository.NewRepositoryRepository(db)
 	teamRepo := repository.NewTeamRepository(db)
 	teamMemberRepo := repository.NewTeamMemberRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
 	githubService := service.NewGitHubService(log)
-	repoService := service.NewRepositoryService(repoRepo, teamRepo, teamMemberRepo, githubService, rdb, cfg, log, cloneCh)
+	forkSvc := service.NewForkService(cfg, db, log)
+	repoService := service.NewRepositoryService(repoRepo, teamRepo, teamMemberRepo, githubService, forkSvc, rdb, cfg, log)
+
 	repoHandler := handler.NewRepositoryHandler(repoService)
 
 	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
@@ -88,7 +92,6 @@ func registerRepositoryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg 
 	repos.GET("/:id/branches", repoHandler.ListBranches)
 	repos.GET("/:id/commits", repoHandler.ListCommits)
 	repos.POST("/:id/resync", repoHandler.Resync)
-	repos.POST("/:id/retry-clone", repoHandler.RetryClone)
 }
 
 func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger, q *queue.RedisQueue) {
@@ -98,8 +101,9 @@ func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	repoRepo := repository.NewRepositoryRepository(db)
 	teamMemberRepo := repository.NewTeamMemberRepository(db)
 	userRepo := repository.NewUserRepository(db)
+	forkSvc := service.NewForkService(cfg, db, log)
 
-	suiteService := service.NewTestSuiteService(suiteRepo, repoRepo, teamMemberRepo, log)
+	suiteService := service.NewTestSuiteService(suiteRepo, repoRepo, teamMemberRepo, forkSvc, log)
 	runService := service.NewTestRunService(runRepo, resultRepo, suiteRepo, repoRepo, teamMemberRepo, userRepo, q, rdb, cfg, log)
 
 	suiteHandler := handler.NewTestSuiteHandler(suiteService)
@@ -155,8 +159,11 @@ func registerUserRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	sessionRepo := repository.NewSessionRepository(db)
 	resetRepo := repository.NewPasswordResetRepository(db)
 	banReviewRepo := repository.NewBanReviewRepository(db)
+	notifRepo := repository.NewNotificationRepository(db)
 
 	authService := service.NewAuthService(userRepo, sessionRepo, resetRepo, banReviewRepo, rdb, cfg, log)
+	notifService := service.NewNotificationService(notifRepo, userRepo, rdb, log)
+	authService.SetNotificationService(notifService)
 	userHandler := handler.NewUserHandler(authService, userRepo)
 
 	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
@@ -173,8 +180,10 @@ func registerAdminRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *conf
 	banReviewRepo := repository.NewBanReviewRepository(db)
 	teamMemberRepo := repository.NewTeamMemberRepository(db)
 	teamRepo := repository.NewTeamRepository(db)
+	notifRepo := repository.NewNotificationRepository(db)
 
-	adminService := service.NewAdminService(userRepo, sessionRepo, banReviewRepo, teamMemberRepo, teamRepo, rdb, db, log)
+	notifService := service.NewNotificationService(notifRepo, userRepo, rdb, log)
+	adminService := service.NewAdminService(userRepo, sessionRepo, banReviewRepo, teamMemberRepo, teamRepo, notifService, rdb, db, log)
 	adminHandler := handler.NewAdminHandler(adminService)
 
 	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
@@ -189,6 +198,46 @@ func registerAdminRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *conf
 	admin.GET("/teams", adminHandler.ListAllTeams)
 	admin.GET("/ban-reviews", adminHandler.ListPendingBanReviews)
 	admin.PUT("/ban-reviews/:id", adminHandler.ReviewBan)
+
+	// Admin notifications / mail (root/admin only)
+	requireRootAdmin := mw.RequireRole("root", "admin")
+	adminMailHandler := handler.NewAdminMailHandler(notifService, userRepo)
+	admin.POST("/mail", adminMailHandler.SendMail, requireRootAdmin)
+}
+
+func registerForkRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	userRepo := repository.NewUserRepository(db)
+	repoRepo := repository.NewRepositoryRepository(db)
+	forkSvc := service.NewForkService(cfg, db, log)
+	forkHandler := handler.NewForkHandler(forkSvc, repoRepo)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	repos := e.Group("/v1/repositories", authMiddleware)
+	repos.POST("/:id/fork", forkHandler.SetupFork)
+	repos.POST("/:id/fork/sync", forkHandler.SyncFork)
+	repos.GET("/:id/fork/status", forkHandler.GetForkStatus)
+}
+
+func registerNotificationRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	userRepo := repository.NewUserRepository(db)
+	notifRepo := repository.NewNotificationRepository(db)
+	notifService := service.NewNotificationService(notifRepo, userRepo, rdb, log)
+	notifHandler := handler.NewNotificationHandler(notifService)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	notifs := e.Group("/v1/notifications", authMiddleware)
+	notifs.GET("", notifHandler.List)
+	notifs.GET("/unread-count", notifHandler.UnreadCount)
+	notifs.PUT("/:id/read", notifHandler.MarkRead)
+	notifs.PUT("/read-all", notifHandler.MarkAllRead)
+}
+
+func registerSSERoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+	userRepo := repository.NewUserRepository(db)
+	eventsHandler := handler.NewEventsHandler(rdb)
+
+	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
+	e.GET("/v1/sse/stream", eventsHandler.Stream, authMiddleware)
 }
 
 func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
@@ -197,9 +246,12 @@ func registerAuthRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	sessionRepo := repository.NewSessionRepository(db)
 	resetRepo := repository.NewPasswordResetRepository(db)
 	banReviewRepo := repository.NewBanReviewRepository(db)
+	notifRepo := repository.NewNotificationRepository(db)
 
 	// Services
 	authService := service.NewAuthService(userRepo, sessionRepo, resetRepo, banReviewRepo, rdb, cfg, log)
+	notifService := service.NewNotificationService(notifRepo, userRepo, rdb, log)
+	authService.SetNotificationService(notifService)
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authService, userRepo, cfg)

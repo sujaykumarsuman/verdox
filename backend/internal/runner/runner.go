@@ -3,7 +3,6 @@ package runner
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -16,14 +15,12 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/model"
 	"github.com/sujaykumarsuman/verdox/backend/internal/queue"
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
-	"github.com/sujaykumarsuman/verdox/backend/pkg/encryption"
 )
 
 type WorkerPool struct {
 	size       int
 	queue      *queue.RedisQueue
 	executors  map[string]Executor
-	container  *ContainerExecutor
 	db         *sqlx.DB
 	rdb        *redis.Client
 	cfg        *config.Config
@@ -38,21 +35,17 @@ func NewWorkerPool(
 	db *sqlx.DB,
 	rdb *redis.Client,
 	log zerolog.Logger,
-	containerExec *ContainerExecutor,
-	ghaExec *GHAExecutor,
+	forkGHAExec *ForkGHAExecutor,
 ) *WorkerPool {
-	executors := map[string]Executor{
-		ModeContainer: containerExec,
-	}
-	if ghaExec != nil {
-		executors[ModeGHA] = ghaExec
+	executors := map[string]Executor{}
+	if forkGHAExec != nil {
+		executors[ModeForkGHA] = forkGHAExec
 	}
 
 	return &WorkerPool{
 		size:      cfg.RunnerMaxConcurrent,
 		queue:     q,
 		executors: executors,
-		container: containerExec,
 		db:        db,
 		rdb:       rdb,
 		cfg:       cfg,
@@ -80,8 +73,7 @@ func (wp *WorkerPool) Shutdown() {
 	case <-done:
 		wp.log.Info().Msg("all workers stopped gracefully")
 	case <-time.After(60 * time.Second):
-		wp.log.Warn().Msg("shutdown deadline exceeded, force killing containers")
-		wp.container.ForceKillAll()
+		wp.log.Warn().Msg("shutdown deadline exceeded")
 	}
 }
 
@@ -117,7 +109,6 @@ func (wp *WorkerPool) executeJob(ctx context.Context, workerID string, job *mode
 	log = log.With().
 		Str("run_id", job.TestRunID).
 		Str("repo", job.RepositoryFullName).
-		Str("mode", job.ExecutionMode).
 		Logger()
 
 	log.Info().Msg("executing test run")
@@ -127,12 +118,12 @@ func (wp *WorkerPool) executeJob(ctx context.Context, workerID string, job *mode
 
 	runID, _ := uuid.Parse(job.TestRunID)
 
-	// Look up the executor
-	executor, ok := wp.executors[job.ExecutionMode]
+	// Look up the fork_gha executor
+	executor, ok := wp.executors[ModeForkGHA]
 	if !ok {
-		log.Error().Str("mode", job.ExecutionMode).Msg("unsupported execution mode")
+		log.Error().Msg("fork_gha executor not available")
 		runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
-		saveSingleFailResult(ctx, resultRepo, runID, "Unsupported execution mode: "+job.ExecutionMode)
+		saveSingleFailResult(ctx, resultRepo, runID, "Fork GHA executor not configured. Check VERDOX_SERVICE_ACCOUNT_PAT.")
 		wp.queue.Ack(ctx, workerID, job)
 		return
 	}
@@ -143,185 +134,53 @@ func (wp *WorkerPool) executeJob(ctx context.Context, workerID string, job *mode
 		SuiteID:            uuid.MustParse(job.TestSuiteID),
 		RepoID:             uuid.MustParse(job.RepoID),
 		RepositoryFullName: job.RepositoryFullName,
-		LocalPath:          job.LocalPath,
 		DefaultBranch:      job.DefaultBranch,
 		Branch:             job.Branch,
 		CommitHash:         job.CommitHash,
 		SuiteType:          job.SuiteType,
-		ExecutionMode:      job.ExecutionMode,
-		DockerImage:        job.DockerImage,
+		ExecutionMode:      ModeForkGHA,
 		TestCommand:        job.TestCommand,
-		GHAWorkflowID:     job.GHAWorkflowID,
+		GHAWorkflowID:      job.GHAWorkflowID,
 		ConfigPath:         job.ConfigPath,
 		TimeoutSeconds:     job.TimeoutSeconds,
 		EnvVars:            job.EnvVars,
 	}
 
-	// For GHA mode, inject PAT into env vars
-	if job.ExecutionMode == ModeGHA {
-		pat, err := wp.resolveTeamPAT(ctx, runID)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to resolve PAT for GHA dispatch")
-			runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
-			saveSingleFailResult(ctx, resultRepo, runID, "PAT resolution failed: "+err.Error())
-			wp.queue.Ack(ctx, workerID, job)
-			return
-		}
-		if execJob.EnvVars == nil {
-			execJob.EnvVars = make(map[string]string)
-		}
-		execJob.EnvVars["_verdox_pat"] = pat
-
-		// Update run status to running
-		runRepo.UpdateStarted(ctx, runID)
-
-		// GHA dispatch — non-blocking, returns immediately
-		result, err := executor.Execute(ctx, execJob)
-		if err != nil || result.Status == "failed" {
-			errMsg := "GHA dispatch failed"
-			if err != nil {
-				errMsg = err.Error()
-			} else if result.ErrorMsg != "" {
-				errMsg = result.ErrorMsg
-			}
-			runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
-			saveSingleFailResult(ctx, resultRepo, runID, errMsg)
-		}
-		// GHA job dispatched — ack immediately, poller will track completion
+	// Inject fork info from the repository
+	if execJob.EnvVars == nil {
+		execJob.EnvVars = make(map[string]string)
+	}
+	var forkFullName, forkHeadSHA *string
+	err := wp.db.QueryRowContext(ctx,
+		"SELECT fork_full_name, fork_head_sha FROM repositories WHERE id = $1",
+		execJob.RepoID,
+	).Scan(&forkFullName, &forkHeadSHA)
+	if err != nil || forkFullName == nil || *forkFullName == "" {
+		log.Error().Err(err).Msg("fork not set up for this repository")
+		runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
+		saveSingleFailResult(ctx, resultRepo, runID, "Fork not set up for this repository. Run fork setup first.")
 		wp.queue.Ack(ctx, workerID, job)
 		return
 	}
-
-	// Container mode — synchronous execution
-	defer func() {
-		// Reset git to default branch
-		resetCmd := exec.CommandContext(ctx, "git", "checkout", job.DefaultBranch)
-		resetCmd.Dir = job.LocalPath
-		resetCmd.Run()
-
-		wp.queue.Ack(ctx, workerID, job)
-	}()
-
-	// Update run status to running
-	if err := runRepo.UpdateStarted(ctx, runID); err != nil {
-		log.Error().Err(err).Msg("failed to update run status to running")
-		runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
-		return
+	execJob.EnvVars["_fork_full_name"] = *forkFullName
+	if forkHeadSHA != nil {
+		execJob.EnvVars["_fork_head_sha"] = *forkHeadSHA
 	}
 
-	// Prepare workspace: git fetch + checkout
-	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "--depth", "1", "origin", job.CommitHash)
-	fetchCmd.Dir = job.LocalPath
-	fetchOutput, err := fetchCmd.CombinedOutput()
-	if err != nil {
-		log.Error().Err(err).Str("output", string(fetchOutput)).Msg("git fetch failed")
-		runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
-		saveSingleFailResult(ctx, resultRepo, runID, "Git fetch failed: "+string(fetchOutput))
-		return
-	}
-
-	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", "FETCH_HEAD")
-	checkoutCmd.Dir = job.LocalPath
-	checkoutOutput, err := checkoutCmd.CombinedOutput()
-	if err != nil {
-		log.Error().Err(err).Str("output", string(checkoutOutput)).Msg("git checkout failed")
-		runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
-		saveSingleFailResult(ctx, resultRepo, runID, "Git checkout failed: "+string(checkoutOutput))
-		return
-	}
-
-	// Execute in container
+	// Update run status to running and dispatch
+	runRepo.UpdateStarted(ctx, runID)
 	result, err := executor.Execute(ctx, execJob)
-	if err != nil {
-		log.Error().Err(err).Msg("container execution failed")
+	if err != nil || result.Status == "failed" {
+		errMsg := "Fork GHA dispatch failed"
+		if err != nil {
+			errMsg = err.Error()
+		} else if result.ErrorMsg != "" {
+			errMsg = result.ErrorMsg
+		}
 		runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)
-		saveSingleFailResult(ctx, resultRepo, runID, "Execution failed: "+err.Error())
-		return
+		saveSingleFailResult(ctx, resultRepo, runID, errMsg)
 	}
-
-	// Check if run was cancelled
-	currentRun, _ := runRepo.GetByID(ctx, runID)
-	if currentRun != nil && currentRun.Status == model.TestRunStatusCancelled {
-		log.Info().Msg("run was cancelled")
-		return
-	}
-
-	// Batch insert results
-	if len(result.Results) > 0 {
-		modelResults := make([]model.TestResult, len(result.Results))
-		for i, p := range result.Results {
-			r := model.TestResult{
-				TestRunID: runID,
-				TestName:  p.TestName,
-				Status:    model.TestResultStatus(p.Status),
-			}
-			if p.DurationMs > 0 {
-				ms := int(p.DurationMs)
-				r.DurationMs = &ms
-			}
-			if p.ErrorMessage != "" {
-				r.ErrorMessage = &p.ErrorMessage
-			}
-			if p.LogOutput != "" {
-				r.LogOutput = &p.LogOutput
-			}
-			modelResults[i] = r
-		}
-
-		if err := resultRepo.BatchCreate(ctx, modelResults); err != nil {
-			log.Error().Err(err).Msg("failed to batch insert results")
-		}
-	}
-
-	// Update final status
-	finalStatus := model.TestRunStatusPassed
-	if result.Status == "failed" {
-		finalStatus = model.TestRunStatusFailed
-	}
-
-	if err := runRepo.UpdateFinished(ctx, runID, finalStatus); err != nil {
-		log.Error().Err(err).Msg("failed to update final status")
-	}
-
-	log.Info().Str("status", string(finalStatus)).Int("results", len(result.Results)).Msg("test run complete")
-}
-
-// resolveTeamPAT fetches and decrypts the team's GitHub PAT for a given run.
-func (wp *WorkerPool) resolveTeamPAT(ctx context.Context, runID uuid.UUID) (string, error) {
-	runRepo := repository.NewTestRunRepository(wp.db)
-	run, err := runRepo.GetByID(ctx, runID)
-	if err != nil {
-		return "", fmt.Errorf("get run: %w", err)
-	}
-
-	suiteRepo := repository.NewTestSuiteRepository(wp.db)
-	suite, err := suiteRepo.GetByID(ctx, run.TestSuiteID)
-	if err != nil {
-		return "", fmt.Errorf("get suite: %w", err)
-	}
-
-	repoRepo := repository.NewRepositoryRepository(wp.db)
-	teamID, err := repoRepo.GetTeamIDForRepository(ctx, suite.RepositoryID)
-	if err != nil {
-		return "", fmt.Errorf("get team: %w", err)
-	}
-
-	teamRepo := repository.NewTeamRepository(wp.db)
-	team, err := teamRepo.GetByID(ctx, teamID)
-	if err != nil {
-		return "", fmt.Errorf("get team: %w", err)
-	}
-
-	if team.GithubPATEncrypted == nil || team.GithubPATNonce == nil {
-		return "", fmt.Errorf("team has no PAT configured")
-	}
-
-	pat, err := encryption.Decrypt(*team.GithubPATEncrypted, team.GithubPATNonce, wp.cfg.GithubTokenEncryptionKey)
-	if err != nil {
-		return "", fmt.Errorf("decrypt PAT: %w", err)
-	}
-
-	return pat, nil
+	wp.queue.Ack(ctx, workerID, job)
 }
 
 func saveSingleFailResult(ctx context.Context, repo repository.TestResultRepository, runID uuid.UUID, errMsg string) {

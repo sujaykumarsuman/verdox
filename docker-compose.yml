@@ -65,8 +65,6 @@ services:
       - "8080"
     env_file:
       - .env
-    volumes:
-      - repodata:/var/lib/verdox/repositories
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,44 +121,10 @@ services:
     networks:
       - verdox-network
 
-  # ───────────────────────────────────────��──────
-  # Test Runner (Docker-in-Docker)
-  # ──────────────────────────────────────────────
-  runner:
-    build:
-      context: .
-      dockerfile: docker/runner.Dockerfile
-    container_name: verdox-runner
-    privileged: true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - repodata:/var/lib/verdox/repositories:ro
-    environment:
-      - RUNNER_MAX_CONCURRENT=${RUNNER_MAX_CONCURRENT:-5}
-      - RUNNER_MAX_TIMEOUT=${RUNNER_MAX_TIMEOUT:-1800}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      - DATABASE_URL=${DATABASE_URL:-postgres://verdox:changeme@postgres:5432/verdox?sslmode=disable}
-    depends_on:
-      backend:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "docker", "info"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
-    networks:
-      - verdox-network
-
 volumes:
   pgdata:
     driver: local
   redisdata:
-    driver: local
-  repodata:
     driver: local
 
 networks:

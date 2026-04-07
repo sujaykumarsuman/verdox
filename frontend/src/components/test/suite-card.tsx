@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Play, Trash2 } from "lucide-react";
+import { Play, Loader2, CheckCircle2, Trash2, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RunStatusBadge } from "@/components/test/status-badge";
 import { triggerRun, deleteTestSuite } from "@/hooks/use-tests";
+import { cn } from "@/lib/utils";
 import type { TestSuite, TestRun } from "@/types/test";
 
 interface SuiteCardProps {
@@ -61,23 +62,34 @@ export function SuiteCard({
     }
   };
 
+  const isActive = latestRun?.status === "queued" || latestRun?.status === "running";
+  const sameCommit = latestRun?.commit_hash === commitHash && !!commitHash;
+  const runDisabled = !branch || !commitHash || isActive || sameCommit;
+
+  const statusColor = latestRun?.status === "passed"
+    ? "border-l-[var(--success)]"
+    : latestRun?.status === "failed"
+      ? "border-l-[var(--danger)]"
+      : isActive
+        ? "border-l-[var(--accent)]"
+        : "";
+
   return (
-    <Card>
-      <CardBody>
-        <div className="flex items-start justify-between mb-3">
+    <Card className={cn(latestRun && "border-l-[3px]", statusColor)}>
+      <CardBody className="flex flex-col h-full">
+        {/* Top: name + badges + delete */}
+        <div className="flex items-start justify-between mb-auto">
           <div>
-            <h4 className="font-semibold text-text-primary">{suite.name}</h4>
-            <div className="flex items-center gap-1.5 mt-1">
+            <h4 className="font-semibold text-text-primary leading-tight">{suite.name}</h4>
+            <div className="flex items-center gap-1.5 mt-1.5">
               <Badge variant="neutral">{suite.type}</Badge>
-              <Badge variant={suite.execution_mode === "gha" ? "warning" : "info"}>
-                {suite.execution_mode === "gha" ? "GHA" : "Container"}
-              </Badge>
+              <Badge variant="info">Fork GHA</Badge>
             </div>
           </div>
           {!confirmDelete ? (
             <button
               onClick={() => setConfirmDelete(true)}
-              className="text-text-secondary hover:text-[var(--danger)] transition-colors p-1"
+              className="text-text-secondary hover:text-[var(--danger)] transition-colors p-1 -mt-0.5"
               title="Delete suite"
             >
               <Trash2 size={15} />
@@ -94,36 +106,57 @@ export function SuiteCard({
           )}
         </div>
 
-        {latestRun ? (
-          <div className="flex items-center gap-2 text-sm text-text-secondary mb-3">
-            <RunStatusBadge status={latestRun.status} />
-            <span>Run #{latestRun.run_number}</span>
-            {latestRun.branch && (
-              <span className="truncate max-w-[120px]">{latestRun.branch}</span>
+        {/* Bottom: run status + action */}
+        <div className="flex items-end justify-between mt-4 pt-3 border-t border-[var(--border)]">
+          {/* Left: latest run info */}
+          <div className="min-w-0">
+            {latestRun ? (
+              <div className="flex items-center gap-2 text-[13px] text-text-secondary">
+                <RunStatusBadge status={latestRun.status} />
+                <span className="whitespace-nowrap">Run #{latestRun.run_number}</span>
+                {latestRun.branch && (
+                  <span className="truncate max-w-[80px] text-[12px] opacity-70">{latestRun.branch}</span>
+                )}
+              </div>
+            ) : (
+              <p className="text-[13px] text-text-secondary">No runs yet</p>
             )}
           </div>
-        ) : (
-          <p className="text-sm text-text-secondary mb-3">No runs yet</p>
-        )}
 
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={handleTrigger}
-            loading={triggering}
-            disabled={!branch || !commitHash}
-          >
-            <Play size={14} className="mr-1" />
-            Run
-          </Button>
-          {latestRun && (
-            <a
-              href={`/repositories/${repoId}/runs/${latestRun.id}`}
-              className="text-sm text-accent hover:text-accent-light"
+          {/* Right: action buttons */}
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            {latestRun && (
+              <a
+                href={`/repositories/${repoId}/runs/${latestRun.id}`}
+                className="inline-flex items-center gap-1 text-[13px] text-accent hover:text-accent-light transition-colors"
+              >
+                View
+                <ArrowRight size={12} />
+              </a>
+            )}
+            <Button
+              size="sm"
+              variant={isActive ? "secondary" : "default"}
+              onClick={handleTrigger}
+              loading={triggering}
+              disabled={runDisabled}
+              title={
+                isActive
+                  ? "A run is already in progress"
+                  : sameCommit
+                    ? "This commit has already been tested"
+                    : undefined
+              }
             >
-              View Runs
-            </a>
-          )}
+              {isActive ? (
+                <><Loader2 size={14} className="mr-1 animate-spin" />{latestRun?.status === "queued" ? "Queued" : "Running"}</>
+              ) : sameCommit ? (
+                <><CheckCircle2 size={14} className="mr-1" />Tested</>
+              ) : (
+                <><Play size={14} className="mr-1" />Run</>
+              )}
+            </Button>
+          </div>
         </div>
       </CardBody>
     </Card>

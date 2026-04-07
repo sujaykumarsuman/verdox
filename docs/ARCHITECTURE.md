@@ -18,43 +18,51 @@ Docker Compose behind an Nginx reverse proxy.
 - **Frontend:** Next.js 15 (App Router, React Server Components)
 - **Database:** PostgreSQL 17
 - **Cache / Queue:** Redis 7
-- **Test Execution:** Docker-in-Docker (DinD) ephemeral containers
+- **Test Execution:** GitHub Actions (fork-based) -- a Verdox service account
+  forks repos, pushes a workflow file, and dispatches runs on the fork
 - **Reverse Proxy:** Nginx (TLS termination, routing, caching)
 
 **Deployment Model:**
 
-All six services are defined in a single `docker-compose.yml` and communicate
+All five services are defined in a single `docker-compose.yml` and communicate
 over an internal Docker bridge network (`verdox-network`). Nginx is the only
 service that exposes ports to the host, making it suitable for deployment on a
 local machine, a VPS, or any Docker-capable server. There is no dependency on
-Kubernetes or any external orchestrator.
+Kubernetes or any external orchestrator. Test execution is offloaded to GitHub
+Actions via Verdox-managed forks -- no Docker-in-Docker runner is required.
 
 ---
 
 ## 2. Component Diagram
 
 ```
-                         ┌──────────────┐
-                         │    Nginx     │ :80 / :443
-                         │  (reverse    │
-                         │   proxy)     │
-                         └──────┬───────┘
-                                │
-                 ┌──────────────┴──────────────┐
-                 │                             │
-          ┌──────┴───────┐             ┌───────┴───────┐
-          │   Next.js    │ :3000       │   Go API      │ :8080
-          │   Frontend   │             │   Backend     │
-          │  (SSR/CSR)   │             │  (Echo v4)    │
-          └──────────────┘             └───────┬───────┘
-                                               │
-                          ┌────────────────────┼────────────────────┐
-                          │                    │                    │
-                   ┌──────┴──────┐      ┌──────┴──────┐     ┌──────┴──────┐
-                   │ PostgreSQL  │      │    Redis    │     │    DinD     │
-                   │    :5432    │      │    :6379    │     │   Runner    │
-                   │             │      │             │     │ (ephemeral) │
-                   └─────────────┘      └─────────────┘     └─────────────┘
+                         +----------------+
+                         |    Nginx       | :80 / :443
+                         |  (reverse      |
+                         |   proxy)       |
+                         +-------+--------+
+                                 |
+                  +--------------+--------------+
+                  |                             |
+           +------+--------+            +------+--------+
+           |   Next.js     | :3000      |   Go API      | :8080
+           |   Frontend    |            |   Backend     |
+           |  (SSR/CSR)    |            |  (Echo v4)    |
+           +---------------+            +------+--------+
+                                               |
+                          +--------------------+--------------------+
+                          |                                        |
+                   +------+------+                          +------+------+
+                   | PostgreSQL  |                          |    Redis    |
+                   |    :5432    |                          |    :6379    |
+                   |             |                          |             |
+                   +-------------+                          +-------------+
+
+                                    + - - - - - - - - - - - - - +
+                                    | GitHub Actions (external) |
+                                    |  Fork-based test execution|
+                                    |  via service account PAT  |
+                                    + - - - - - - - - - - - - - +
 ```
 
 **Request routing summary:**
@@ -62,6 +70,8 @@ Kubernetes or any external orchestrator.
 - `/*` (non-API paths) are proxied to the Next.js frontend on port 3000.
 - `/api/*` paths are proxied to the Go backend on port 8080.
 - All inter-service communication stays on the internal Docker network.
+- Test execution is dispatched to GitHub Actions on Verdox-managed forks
+  (external to the Docker network).
 
 ---
 
@@ -71,10 +81,9 @@ Kubernetes or any external orchestrator.
 |---------|---------------|------|------------------|
 | **Nginx** | `verdox-nginx` | 80, 443 | TLS termination (Let's Encrypt or self-signed), reverse proxy routing (`/api/*` to backend, all else to frontend), static asset caching with `Cache-Control` headers, security headers (`X-Frame-Options`, `CSP`, `HSTS`), network-level rate limiting via `limit_req` |
 | **Frontend (Next.js)** | `verdox-frontend` | 3000 | Server-side rendering and client-side rendering of UI pages, authentication state management (reading JWT from cookies), API consumption via server-side `fetch` and client-side hooks, theme management (light/dark), route protection with middleware guards |
-| **Backend (Go/Echo)** | `verdox-backend` | 8080 | REST API for all business operations, authentication and authorization (JWT issuance and validation), team-level PAT-encrypted GitHub access, local repository clone management, per-repo sequential job queue (Redis), test result parsing and storage |
+| **Backend (Go/Echo)** | `verdox-backend` | 8080 | REST API for all business operations, authentication and authorization (JWT issuance and validation), team-level PAT-encrypted GitHub access, fork-based test execution via GitHub Actions (ForkService, ForkGHAExecutor, GHAPoller), per-repo job queue (Redis), test result parsing and storage |
 | **PostgreSQL** | `verdox-postgres` | 5432 | Persistent storage for all domain data: users, repositories, teams, team memberships, test runs, individual test results, sessions. Schema migrations managed by the backend on startup |
 | **Redis** | `verdox-redis` | 6379 | Session cache (fast JWT session lookups), per-repo sequential job queue (`verdox:jobs:repo:{repo_id}` lists + `verdox:jobs:active:{repo_id}` locks), rate limit counters (sliding window per user/IP) |
-| **DinD Runner** | `verdox-runner` | -- | Ephemeral container execution (one container per test run), local clone mounted read-only (`-v {local_path}:/workspace:ro`), test command execution inside the container, stdout/stderr log capture and streaming back to the worker |
 
 ---
 
@@ -84,35 +93,35 @@ Kubernetes or any external orchestrator.
 
 ```
  Client                Nginx              Frontend           Backend            PostgreSQL         Redis
-   │                     │                    │                  │                    │                │
-   │  POST /login        │                    │                  │                    │                │
-   │────────────────────>│                    │                  │                    │                │
-   │                     │  proxy /api/login  │                  │                    │                │
-   │                     │───────────────────────────────────>  │                    │                │
-   │                     │                    │                  │                    │                │
-   │                     │                    │                  │  SELECT user       │                │
-   │                     │                    │                  │  WHERE email=?     │                │
-   │                     │                    │                  │───────────────────>│                │
-   │                     │                    │                  │                    │                │
-   │                     │                    │                  │  user row          │                │
-   │                     │                    │                  │<───────────────────│                │
-   │                     │                    │                  │                    │                │
-   │                     │                    │                  │  bcrypt.Compare    │                │
-   │                     │                    │                  │  (password check)  │                │
-   │                     │                    │                  │                    │                │
-   │                     │                    │                  │  Generate JWT      │                │
-   │                     │                    │                  │  (access + refresh)│                │
-   │                     │                    │                  │                    │                │
-   │                     │                    │                  │  SET session:{id}  │                │
-   │                     │                    │                  │──────────────────────────────────> │
-   │                     │                    │                  │                    │                │
-   │                     │                    │                  │  session cached    │                │
-   │                     │                    │                  │<──────────────────────────────────│
-   │                     │                    │                  │                    │                │
-   │  Set-Cookie: access_token (httpOnly)     │                  │                    │                │
-   │  Set-Cookie: refresh_token (httpOnly)    │                  │                    │                │
-   │<────────────────────────────────────────────────────────── │                    │                │
-   │                     │                    │                  │                    │                │
+   |                     |                    |                  |                    |                |
+   |  POST /login        |                    |                  |                    |                |
+   |-------------------->|                    |                  |                    |                |
+   |                     |  proxy /api/login  |                  |                    |                |
+   |                     |--------------------------------------->                    |                |
+   |                     |                    |                  |                    |                |
+   |                     |                    |                  |  SELECT user       |                |
+   |                     |                    |                  |  WHERE email=?     |                |
+   |                     |                    |                  |------------------->|                |
+   |                     |                    |                  |                    |                |
+   |                     |                    |                  |  user row          |                |
+   |                     |                    |                  |<-------------------|                |
+   |                     |                    |                  |                    |                |
+   |                     |                    |                  |  bcrypt.Compare    |                |
+   |                     |                    |                  |  (password check)  |                |
+   |                     |                    |                  |                    |                |
+   |                     |                    |                  |  Generate JWT      |                |
+   |                     |                    |                  |  (access + refresh)|                |
+   |                     |                    |                  |                    |                |
+   |                     |                    |                  |  SET session:{id}  |                |
+   |                     |                    |                  |------------------------------------->
+   |                     |                    |                  |                    |                |
+   |                     |                    |                  |  session cached    |                |
+   |                     |                    |                  |<-------------------------------------
+   |                     |                    |                  |                    |                |
+   |  Set-Cookie: access_token (httpOnly)     |                  |                    |                |
+   |  Set-Cookie: refresh_token (httpOnly)    |                  |                    |                |
+   |<-------------------------------------------------------------|                    |                |
+   |                     |                    |                  |                    |                |
 ```
 
 **Key points:**
@@ -123,204 +132,153 @@ Kubernetes or any external orchestrator.
 
 ---
 
-### 4b. Repository Add & Clone Flow
+### 4b. Repository Add Flow
 
 ```
- Client              Backend API            PostgreSQL          Redis Queue        Worker          Local Disk
-   │                    │                       │                   │                 │                │
-   │  POST /api/v1/     │                       │                   │                 │                │
-   │  repositories      │                       │                   │                 │                │
-   │  {github_url}      │                       │                   │                 │                │
-   │───────────────────>│                       │                   │                 │                │
-   │                    │                       │                   │                 │                │
-   │                    │  Validate URL format  │                   │                 │                │
-   │                    │  Lookup team PAT      │                   │                 │                │
-   │                    │  (decrypt AES-256)    │                   │                 │                │
-   │                    │                       │                   │                 │                │
-   │                    │  INSERT INTO repos    │                   │                 │                │
-   │                    │  (clone_status:       │                   │                 │                │
-   │                    │   'pending')          │                   │                 │                │
-   │                    │──────────────────────>│                   │                 │                │
-   │                    │                       │                   │                 │                │
-   │                    │  LPUSH                │                   │                 │                │
-   │                    │  verdox:jobs:clone    │                   │                 │                │
-   │                    │  {repo_id, url, pat}  │                   │                 │                │
-   │                    │──────────────────────────────────────────>│                 │                │
-   │                    │                       │                   │                 │                │
-   │  202 Accepted      │                       │                   │                 │                │
-   │  {repo, status:    │                       │                   │                 │                │
-   │   pending}         │                       │                   │                 │                │
-   │<───────────────────│                       │                   │                 │                │
-   │                    │                       │                   │                 │                │
-   │                    │                       │                   │  BRPOP          │                │
-   │                    │                       │                   │  verdox:jobs:   │                │
-   │                    │                       │                   │  clone          │                │
-   │                    │                       │                   │<────────────────│                │
-   │                    │                       │                   │                 │                │
-   │                    │                       │                   │                 │  git clone     │
-   │                    │                       │                   │                 │  --depth 1     │
-   │                    │                       │                   │                 │  --branch main │
-   │                    │                       │                   │                 │────────────────>
-   │                    │                       │                   │                 │                │
-   │                    │                       │                   │                 │  UPDATE repos  │
-   │                    │                       │                   │                 │  SET clone_    │
-   │                    │                       │                   │                 │  status =      │
-   │                    │                       │                   │                 │  'ready',      │
-   │                    │                       │                   │                 │  local_path    │
-   │                    │                       │                   │                 │──────────────> │
-   │                    │                       │                   │                 │  (via PG)      │
-   │                    │                       │                   │                 │                │
+ Client              Backend API            PostgreSQL          GitHub API
+   |                    |                       |                   |
+   |  POST /api/v1/     |                       |                   |
+   |  repositories      |                       |                   |
+   |  {github_url}      |                       |                   |
+   |----------------->  |                       |                   |
+   |                    |                       |                   |
+   |                    |  Validate URL format  |                   |
+   |                    |  Lookup team PAT      |                   |
+   |                    |  (decrypt AES-256)    |                   |
+   |                    |                       |                   |
+   |                    |  Validate repo via    |                   |
+   |                    |  GitHub API           |                   |
+   |                    |---------------------------------------------->
+   |                    |                       |                   |
+   |                    |  INSERT INTO repos    |                   |
+   |                    |  (status: 'active')   |                   |
+   |                    |--------------------->|                   |
+   |                    |                       |                   |
+   |  201 Created       |                       |                   |
+   |  {repo data}       |                       |                   |
+   |<-----------------  |                       |                   |
 ```
 
 **Key points:**
 
 - Users add repos by GitHub URL (e.g., `https://github.com/org/repo`).
-- The backend resolves the team's PAT (repo -> team -> `teams.github_pat_encrypted`) and decrypts it (AES-256-GCM) for git authentication.
-- Repos are shallow-cloned (`--depth 1`) to `VERDOX_REPO_BASE_PATH/{repo_id}/` on local disk.
-- Clone happens asynchronously via a worker -- the API returns 202 immediately.
-- Branch listing uses `git ls-remote --heads origin` (works with shallow clones).
-- Commit listing uses GitHub API `GET /repos/{owner}/{repo}/commits` (the only GitHub API call).
+- The backend resolves the team's PAT (repo -> team -> `teams.github_pat_encrypted`) and decrypts it (AES-256-GCM) for GitHub API authentication.
+- No local clone is performed. Repository data (branches, commits) is fetched from the GitHub API as needed.
+- Fork creation is deferred to the first test run trigger.
 
 ---
 
-### 4c. Test Run Execution Flow
+### 4c. Test Run Execution Flow (Fork-Based GHA)
 
-This is the core workflow of Verdox. It uses a per-repo sequential queue,
-local clone mounted read-only, commit-hash caching, and ephemeral DinD containers.
+This is the core workflow of Verdox. It uses fork-based GitHub Actions execution:
+the service account forks the repo, pushes a Verdox workflow file, dispatches the
+workflow, and polls/receives webhooks for results.
 
 ```
- Client        Backend API        PostgreSQL        Redis                Worker Goroutine      Docker (DinD)
-   │               │                  │                  │                   │                    │
-   │  POST /api/   │                  │                  │                   │                    │
-   │  v1/suites/   │                  │                  │                   │                    │
-   │  {id}/runs    │                  │                  │                   │                    │
-   │  {branch}     │                  │                  │                   │                    │
-   │──────────────>│                  │                  │                   │                    │
-   │               │                  │                  │                   │                    │
-   │               │  Check: existing │                  │                   │                    │
-   │               │  run for same    │                  │                   │                    │
-   │               │  suite+branch+   │                  │                   │                    │
-   │               │  commit_sha?     │                  │                   │                    │
-   │               │─────────────────>│                  │                   │                    │
-   │               │                  │                  │                   │                    │
-   │               │  (if cached and  │                  │                   │                    │
-   │               │   !force: return │                  │                   │                    │
-   │               │   cached result) │                  │                   │                    │
-   │               │                  │                  │                   │                    │
-   │               │  INSERT INTO     │                  │                   │                    │
-   │               │  test_runs       │                  │                   │                    │
-   │               │  (status:queued, │                  │                   │                    │
-   │               │   run_number++)  │                  │                   │                    │
-   │               │─────────────────>│                  │                   │                    │
-   │               │                  │                  │                   │                    │
-   │               │  LPUSH           │                  │                   │                    │
-   │               │  verdox:jobs:    │                  │                   │                    │
-   │               │  repo:{repo_id} │                  │                   │                    │
-   │               │  {run_id, ...}   │                  │                   │                    │
-   │               │─────────────────────────────────>  │                   │                    │
-   │               │                  │                  │                   │                    │
-   │  202 Accepted │                  │                  │                   │                    │
-   │  {run_id}     │                  │                  │                   │                    │
-   │<──────────────│                  │                  │                   │                    │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │  SETNX            │                    │
-   │               │                  │                  │  verdox:jobs:     │                    │
-   │               │                  │                  │  active:{repo_id} │                    │
-   │               │                  │                  │<──────────────────│                    │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │  (lock acquired)  │                    │
-   │               │                  │                  │──────────────────>│                    │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │  RPOP             │                    │
-   │               │                  │                  │  verdox:jobs:     │                    │
-   │               │                  │                  │  repo:{repo_id}   │                    │
-   │               │                  │                  │<──────────────────│                    │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │  git fetch         │
-   │               │                  │                  │                   │  --depth 1 origin  │
-   │               │                  │                  │                   │  {branch}          │
-   │               │                  │                  │                   │  (on local clone)  │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │  git checkout      │
-   │               │                  │                  │                   │  FETCH_HEAD        │
-   │               │                  │                  │                   │  (detached HEAD)   │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │  UPDATE test_runs  │
-   │               │                  │                  │                   │  SET status =      │
-   │               │                  │                  │                   │  'running'         │
-   │               │                  │                  │                   │────────────────>   │
-   │               │                  │                  │                   │  (via PostgreSQL)  │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │  docker create     │
-   │               │                  │                  │                   │  -v local_path:    │
-   │               │                  │                  │                   │  /workspace:ro     │
-   │               │                  │                  │                   │───────────────────>│
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │                    │  run test
-   │               │                  │                  │                   │                    │  command
-   │               │                  │                  │                   │                    │  in /workspace
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │  stdout/stderr     │
-   │               │                  │                  │                   │<───────────────────│
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │  docker rm         │
-   │               │                  │                  │                   │  (cleanup)         │
-   │               │                  │                  │                   │───────────────────>│
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │                   │  Parse test output │
-   │               │                  │                  │                   │  INSERT results    │
-   │               │                  │                  │                   │  UPDATE test_runs  │
-   │               │                  │                  │                   │  SET status, time  │
-   │               │                  │                  │                   │────────────────>   │
-   │               │                  │                  │                   │  (via PostgreSQL)  │
-   │               │                  │                  │                   │                    │
-   │               │                  │                  │  DEL active lock  │                    │
-   │               │                  │                  │  Process next job │                    │
-   │               │                  │                  │  in repo queue    │                    │
-   │               │                  │                  │<──────────────────│                    │
-   │               │                  │                  │                   │                    │
-   │  GET /api/v1/ │                  │                  │                   │                    │
-   │  runs/{id}    │                  │                  │                   │                    │
-   │  (polling)    │                  │                  │                   │                    │
-   │──────────────>│                  │                  │                   │                    │
-   │               │  SELECT ...      │                  │                   │                    │
-   │               │─────────────────>│                  │                   │                    │
-   │               │                  │                  │                   │                    │
-   │  200 OK       │                  │                  │                   │                    │
-   │  {status:     │                  │                  │                   │                    │
-   │   passed,     │                  │                  │                   │                    │
-   │   results:[]} │                  │                  │                   │                    │
-   │<──────────────│                  │                  │                   │                    │
+ Client        Backend API        PostgreSQL        Redis             Worker            GitHub API / GHA
+   |               |                  |                  |                |                    |
+   |  POST /api/   |                  |                  |                |                    |
+   |  v1/suites/   |                  |                  |                |                    |
+   |  {id}/runs    |                  |                  |                |                    |
+   |  {branch}     |                  |                  |                |                    |
+   |-------------->|                  |                  |                |                    |
+   |               |                  |                  |                |                    |
+   |               |  INSERT INTO     |                  |                |                    |
+   |               |  test_runs       |                  |                |                    |
+   |               |  (status:queued) |                  |                |                    |
+   |               |----------------->|                  |                |                    |
+   |               |                  |                  |                |                    |
+   |               |  LPUSH job       |                  |                |                    |
+   |               |  to queue        |                  |                |                    |
+   |               |------------------------------------->                |                    |
+   |               |                  |                  |                |                    |
+   |  202 Accepted |                  |                  |                |                    |
+   |<--------------|                  |                  |                |                    |
+   |               |                  |                  |                |                    |
+   |               |                  |                  |  Pop job       |                    |
+   |               |                  |                  |<---------------|                    |
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  Fork repo (if     |
+   |               |                  |                  |                |  not already       |
+   |               |                  |                  |                |  forked)           |
+   |               |                  |                  |                |------------------->|
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  Sync fork         |
+   |               |                  |                  |                |  upstream          |
+   |               |                  |                  |                |------------------->|
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  Push verdox-      |
+   |               |                  |                  |                |  test.yml          |
+   |               |                  |                  |                |  workflow file     |
+   |               |                  |                  |                |------------------->|
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  workflow_dispatch |
+   |               |                  |                  |                |------------------->|
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  UPDATE status =   |
+   |               |                  |                  |                |  'running'         |
+   |               |                  |                  |                |--------->          |
+   |               |                  |                  |                |  (via PG)          |
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |                    |  GHA executes
+   |               |                  |                  |                |                    |  tests on
+   |               |                  |                  |                |                    |  runner
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  GHAPoller checks  |
+   |               |                  |                  |                |  workflow run      |
+   |               |                  |                  |                |  status            |
+   |               |                  |                  |                |------------------->|
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  Download logs /   |
+   |               |                  |                  |                |  artifacts         |
+   |               |                  |                  |                |------------------->|
+   |               |                  |                  |                |                    |
+   |               |                  |                  |                |  Parse results     |
+   |               |                  |                  |                |  INSERT results    |
+   |               |                  |                  |                |  UPDATE test_runs  |
+   |               |                  |                  |                |--------->          |
+   |               |                  |                  |                |  (via PG)          |
+   |               |                  |                  |                |                    |
+   |  GET /api/v1/ |                  |                  |                |                    |
+   |  runs/{id}    |                  |                  |                |                    |
+   |  (polling)    |                  |                  |                |                    |
+   |-------------->|                  |                  |                |                    |
+   |               |  SELECT ...      |                  |                |                    |
+   |               |----------------->|                  |                |                    |
+   |               |                  |                  |                |                    |
+   |  200 OK       |                  |                  |                |                    |
+   |  {status:     |                  |                  |                |                    |
+   |   passed,     |                  |                  |                |                    |
+   |   results:[]} |                  |                  |                |                    |
+   |<--------------|                  |                  |                |                    |
 ```
 
 **Step-by-step breakdown:**
 
 | Step | Actor | Action |
 |------|-------|--------|
-| 1 | Client | Sends `POST /api/v1/suites/{id}/runs` with `branch` (commit SHA resolved from branch HEAD) |
-| 2 | Backend API | **Commit-hash cache check:** queries for existing run with same suite + branch + commit SHA. If found and `force` is not set, returns cached result immediately |
-| 3 | Backend API | Creates a `test_runs` row with `status = 'queued'`, increments `run_number` per suite+branch |
-| 4 | Backend API | Pushes job onto the per-repo Redis queue (`LPUSH verdox:jobs:repo:{repo_id}`) |
-| 5 | Backend API | Returns `202 Accepted` with the `run_id` immediately (non-blocking) |
-| 6 | Worker goroutine | Attempts to acquire the per-repo active lock (`SETNX verdox:jobs:active:{repo_id}`) |
-| 7 | Worker | Pops job from the repo's queue (`RPOP verdox:jobs:repo:{repo_id}`) |
-| 8 | Worker | Fetches the target branch on the local clone: `git fetch --depth 1 origin {branch}` |
-| 9 | Worker | Checks out `FETCH_HEAD` (detached HEAD — no branch cleanup needed) |
+| 1 | Client | Sends `POST /api/v1/suites/{id}/runs` with `branch` |
+| 2 | Backend API | Creates a `test_runs` row with `status = 'queued'`, increments `run_number` per suite+branch |
+| 3 | Backend API | Pushes job onto the per-repo Redis queue (`LPUSH verdox:jobs:repo:{repo_id}`) |
+| 4 | Backend API | Returns `202 Accepted` with the `run_id` immediately (non-blocking) |
+| 5 | Worker | Pops job from the repo's queue |
+| 6 | ForkGHAExecutor | Forks the repo under the service account (if not already forked) |
+| 7 | ForkGHAExecutor | Syncs the fork with upstream (`POST /repos/{owner}/{repo}/merge-upstream`) |
+| 8 | ForkGHAExecutor | Pushes `verdox-test.yml` workflow file to the fork's `.github/workflows/` directory |
+| 9 | ForkGHAExecutor | Dispatches the workflow via `POST /repos/{fork_owner}/{repo}/actions/workflows/verdox-test.yml/dispatches` |
 | 10 | Worker | Updates `test_runs` status to `'running'` in PostgreSQL |
-| 11 | Worker | Creates ephemeral DinD container with local clone mounted read-only (`-v {local_path}:/workspace:ro`) |
-| 12 | Container | Executes the configured test command (e.g., `go test ./...`, `npm test`) in `/workspace` |
-| 13 | Worker | Captures stdout/stderr streams, removes ephemeral container |
-| 14 | Worker | Parses test output into individual test case results, batch-inserts `test_results` rows |
-| 15 | Worker | Updates `test_runs` to `'passed'`/`'failed'`, sets `finished_at` timestamp |
-| 16 | Worker | Releases the per-repo active lock (`DEL verdox:jobs:active:{repo_id}`), processes next queued job if any |
-| 17 | Frontend | Polls `GET /api/v1/runs/{id}` on an interval and renders results when complete |
+| 11 | GHAPoller | Polls `GET /repos/{fork_owner}/{repo}/actions/runs` for workflow completion |
+| 12 | Worker | Downloads workflow logs and artifacts from the completed GHA run |
+| 13 | Worker | Parses test output into individual test case results, batch-inserts `test_results` rows |
+| 14 | Worker | Updates `test_runs` to `'passed'`/`'failed'`, sets `finished_at` timestamp |
+| 15 | Frontend | Polls `GET /api/v1/runs/{id}` on an interval and renders results when complete |
 
 **Key design decisions:**
 
-- **Per-repo sequential queue:** Only one test run executes per repo at a time (prevents git checkout conflicts on the shared local clone). Different repos run in parallel up to `RUNNER_MAX_CONCURRENT`.
-- **Commit-hash caching:** Avoids redundant runs when the branch HEAD hasn't changed.
-- **Read-only mount:** The local clone is mounted as `:ro` into the DinD container — tests cannot modify the source.
-- **Detached HEAD:** `git checkout FETCH_HEAD` avoids creating local branch refs that need cleanup.
+- **Fork-based isolation:** Tests run on GitHub-hosted runners via Verdox-managed forks. No Docker-in-Docker, no privileged containers, no local compute required for test execution.
+- **Service account PAT:** A dedicated service account PAT (`VERDOX_SERVICE_ACCOUNT_PAT`) is used for all fork and workflow operations. Team PATs are optional overrides for private repo access.
+- **Per-repo sequential queue:** Only one test run executes per repo at a time (prevents conflicting dispatches). Different repos run in parallel.
+- **Workflow dispatch:** The `workflow_dispatch` event triggers the workflow on the fork. The workflow file is managed by Verdox and pushed to the fork automatically.
 - **Permission:** Only root, moderator, team admin, or team maintainer can trigger runs.
 
 ---
@@ -329,53 +287,53 @@ local clone mounted read-only, commit-hash caching, and ephemeral DinD container
 
 ```
  Request              Auth Middleware         Role Middleware        Team Check            Handler
-   │                       │                      │                     │                    │
-   │  ANY /api/v1/teams/   │                      │                     │                    │
-   │  {team_id}/...        │                      │                     │                    │
-   │──────────────────────>│                      │                     │                    │
-   │                       │                      │                     │                    │
-   │                       │  Extract JWT from    │                     │                    │
-   │                       │  cookie / header     │                     │                    │
-   │                       │                      │                     │                    │
-   │                       │  Validate signature  │                     │                    │
-   │                       │  + expiration        │                     │                    │
-   │                       │                      │                     │                    │
-   │                       │  Check session in    │                     │                    │
-   │                       │  Redis (not revoked) │                     │                    │
-   │                       │                      │                     │                    │
-   │                       │  Set user in context │                     │                    │
-   │                       │─────────────────────>│                     │                    │
-   │                       │                      │                     │                    │
-   │                       │                      │  Check user.role    │                    │
-   │                       │                      │  (root/moderator/   │                    │
-   │                       │                      │   user)             │                    │
-   │                       │                      │                     │                    │
-   │                       │                      │  If root/moderator: │                    │
-   │                       │                      │  skip team check    │                    │
-   │                       │                      │─────────────────────────────────────────>│
-   │                       │                      │                     │                    │
-   │                       │                      │  If user: check     │                    │
-   │                       │                      │  team membership    │                    │
-   │                       │                      │  + team role        │                    │
-   │                       │                      │────────────────────>│                    │
-   │                       │                      │                     │                    │
-   │                       │                      │                     │  SELECT FROM       │
-   │                       │                      │                     │  team_members      │
-   │                       │                      │                     │  WHERE user_id     │
-   │                       │                      │                     │  AND team_id       │
-   │                       │                      │                     │  AND status =      │
-   │                       │                      │                     │  'approved'        │
-   │                       │                      │                     │                    │
-   │                       │                      │                     │  Check team_role   │
-   │                       │                      │                     │  (admin/maintainer │
-   │                       │                      │                     │   /viewer) meets   │
-   │                       │                      │                     │  required level    │
-   │                       │                      │                     │────────────────────>
-   │                       │                      │                     │                    │
-   │                       │                      │                     │                    │  Execute
-   │                       │                      │                     │                    │  handler
-   │                       │                      │                     │                    │  logic
-   │                       │                      │                     │                    │
+   |                       |                      |                     |                    |
+   |  ANY /api/v1/teams/   |                      |                     |                    |
+   |  {team_id}/...        |                      |                     |                    |
+   |---------------------->|                      |                     |                    |
+   |                       |                      |                     |                    |
+   |                       |  Extract JWT from    |                     |                    |
+   |                       |  cookie / header     |                     |                    |
+   |                       |                      |                     |                    |
+   |                       |  Validate signature  |                     |                    |
+   |                       |  + expiration        |                     |                    |
+   |                       |                      |                     |                    |
+   |                       |  Check session in    |                     |                    |
+   |                       |  Redis (not revoked) |                     |                    |
+   |                       |                      |                     |                    |
+   |                       |  Set user in context |                     |                    |
+   |                       |--------------------->|                     |                    |
+   |                       |                      |                     |                    |
+   |                       |                      |  Check user.role    |                    |
+   |                       |                      |  (root/moderator/   |                    |
+   |                       |                      |   user)             |                    |
+   |                       |                      |                     |                    |
+   |                       |                      |  If root/moderator: |                    |
+   |                       |                      |  skip team check    |                    |
+   |                       |                      |--------------------------------------------->
+   |                       |                      |                     |                    |
+   |                       |                      |  If user: check     |                    |
+   |                       |                      |  team membership    |                    |
+   |                       |                      |  + team role        |                    |
+   |                       |                      |-------------------->|                    |
+   |                       |                      |                     |                    |
+   |                       |                      |                     |  SELECT FROM       |
+   |                       |                      |                     |  team_members      |
+   |                       |                      |                     |  WHERE user_id     |
+   |                       |                      |                     |  AND team_id       |
+   |                       |                      |                     |  AND status =      |
+   |                       |                      |                     |  'approved'        |
+   |                       |                      |                     |                    |
+   |                       |                      |                     |  Check team_role   |
+   |                       |                      |                     |  (admin/maintainer |
+   |                       |                      |                     |   /viewer) meets   |
+   |                       |                      |                     |  required level    |
+   |                       |                      |                     |------------------->|
+   |                       |                      |                     |                    |
+   |                       |                      |                     |                    |  Execute
+   |                       |                      |                     |                    |  handler
+   |                       |                      |                     |                    |  logic
+   |                       |                      |                     |                    |
 ```
 
 **Middleware chain:** `AuthMiddleware` -> `RequireRole(roles...)` -> `RequireTeamRole(teamRoles...)` -> `Handler`
@@ -392,33 +350,38 @@ local clone mounted read-only, commit-hash caching, and ephemeral DinD container
 
 ```
  Host Machine
- ┌──────────────────────────────────────────────────────────────────┐
- │                                                                  │
- │   Ports 80, 443 ──> ┌──────────────────────────────────────┐    │
- │                      │       verdox-network (bridge)        │    │
- │                      │                                      │    │
- │                      │   ┌────────────┐                     │    │
- │                      │   │   Nginx    │ ◄── only service    │    │
- │                      │   │  :80/:443  │     with host port  │    │
- │                      │   └─────┬──────┘     mapping         │    │
- │                      │         │                            │    │
- │                      │    ┌────┴─────┐                      │    │
- │                      │    │          │                      │    │
- │                      │  ┌─┴──────┐ ┌─┴───────┐             │    │
- │                      │  │Next.js │ │ Go API  │             │    │
- │                      │  │ :3000  │ │  :8080  │             │    │
- │                      │  └────────┘ └────┬────┘             │    │
- │                      │                  │                   │    │
- │                      │         ┌────────┼────────┐         │    │
- │                      │         │        │        │         │    │
- │                      │     ┌───┴───┐ ┌──┴──┐ ┌───┴───┐    │    │
- │                      │     │Postgres│ │Redis│ │  DinD │    │    │
- │                      │     │ :5432 │ │:6379│ │Runner │    │    │
- │                      │     └───────┘ └─────┘ └───────┘    │    │
- │                      │                                      │    │
- │                      └──────────────────────────────────────┘    │
- │                                                                  │
- └──────────────────────────────────────────────────────────────────┘
+ +------------------------------------------------------------------+
+ |                                                                  |
+ |   Ports 80, 443 --> +--------------------------------------+    |
+ |                      |       verdox-network (bridge)        |    |
+ |                      |                                      |    |
+ |                      |   +------------+                     |    |
+ |                      |   |   Nginx    | <-- only service    |    |
+ |                      |   |  :80/:443  |     with host port  |    |
+ |                      |   +-----+------+     mapping         |    |
+ |                      |         |                            |    |
+ |                      |    +----+-----+                      |    |
+ |                      |    |          |                      |    |
+ |                      |  +-+------+ +-+-------+             |    |
+ |                      |  |Next.js | | Go API  |             |    |
+ |                      |  | :3000  | |  :8080  |             |    |
+ |                      |  +--------+ +----+----+             |    |
+ |                      |                  |                   |    |
+ |                      |         +--------+--------+         |    |
+ |                      |         |                 |         |    |
+ |                      |     +---+---+         +---+---+     |    |
+ |                      |     |Postgres|        | Redis |     |    |
+ |                      |     | :5432 |         | :6379 |     |    |
+ |                      |     +-------+         +-------+     |    |
+ |                      |                                      |    |
+ |                      +--------------------------------------+    |
+ |                                                                  |
+ |                      + - - - - - - - - - - - - - - - - - - +    |
+ |                      | GitHub Actions (external, fork-based)|    |
+ |                      | Tests run on GHA-hosted runners      |    |
+ |                      + - - - - - - - - - - - - - - - - - - +    |
+ |                                                                  |
+ +------------------------------------------------------------------+
 ```
 
 **Network rules:**
@@ -427,7 +390,7 @@ local clone mounted read-only, commit-hash caching, and ephemeral DinD container
 |------|--------|
 | External access | Only Nginx exposes ports 80 and 443 to the host |
 | Internal services | Frontend, backend, PostgreSQL, and Redis have no host port mappings in production |
-| DinD isolation | The runner sits on the same bridge network but is restricted: it cannot initiate connections to PostgreSQL or Redis directly. It only communicates back to the backend via a callback API endpoint |
+| Test execution | Tests run externally on GitHub Actions runners via fork-based workflow dispatch. The backend communicates with the GitHub API over HTTPS to dispatch and poll workflow runs |
 | DNS resolution | Services reference each other by container name (e.g., `postgres://verdox-postgres:5432`) thanks to Docker's built-in DNS |
 
 ---
@@ -442,8 +405,7 @@ local clone mounted read-only, commit-hash caching, and ephemeral DinD container
 | Frontend (SSR) | Backend | HTTP | Server-side `fetch()` calls to `http://verdox-backend:8080` (internal Docker DNS, no TLS needed) |
 | Backend | PostgreSQL | TCP | `lib/pq` driver, connection pool (`max_open_conns`, `max_idle_conns` configured), SSL mode optional internally |
 | Backend | Redis | TCP | `go-redis/v9` client, connection pool, `DB 0` for sessions/cache, `DB 1` for job queue |
-| Backend | DinD Runner | Unix socket / TCP | Docker client API via `/var/run/docker.sock` mount or TCP `tcp://verdox-runner:2376` with TLS client certs |
-| Backend | GitHub | HTTPS | GitHub REST API v3 only (commit listing), team's PAT decrypted at call time, respects `X-RateLimit-*` headers. Git operations (clone, fetch) use PAT via HTTPS credential embedding |
+| Backend | GitHub API | HTTPS | GitHub REST API v3 for fork management, workflow dispatch, run polling, and artifact download. Service account PAT used for authentication. Respects `X-RateLimit-*` headers |
 
 ---
 
@@ -455,13 +417,13 @@ local clone mounted read-only, commit-hash caching, and ephemeral DinD container
 | **Backend (Go/Echo)** | Single container | Stateless (JWT-based auth); horizontally scalable. Multiple instances can share the same PostgreSQL and Redis. No sticky sessions required |
 | **PostgreSQL** | Single instance, no replicas | Vertical scaling (CPU/RAM) first. Add read replicas for read-heavy workloads. Consider PgBouncer for connection pooling at scale |
 | **Redis** | Single instance | Sufficient for expected load (thousands of jobs/day). Add Redis Sentinel for high availability. Consider Redis Cluster only at very high throughput |
-| **DinD Runner** | Worker goroutines within backend | Scale by increasing `MAX_CONCURRENT_RUNNERS` env var (controls goroutine pool size). Each goroutine manages one ephemeral container. For multi-node scaling, extract the worker into a separate service |
+| **Test Execution (GHA)** | Fork-based GitHub Actions | Scales with GitHub's infrastructure. Concurrency limits set by GitHub plan. Multiple repos can dispatch workflows in parallel |
 | **Nginx** | Single instance | Sufficient for single-node. In a multi-node setup, replace with a cloud load balancer or HAProxy in front of multiple Nginx instances |
 
 **Current architecture constraint:** Single-node Docker Compose deployment. This
 is intentional -- Verdox targets small-to-medium teams who want simplicity over
 distributed system complexity. Migration to Kubernetes is possible but not
-planned.
+planned. Test execution scales independently via GitHub Actions.
 
 ---
 
@@ -470,7 +432,7 @@ planned.
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | **HTTP framework** | Echo v4 over Gin | Cleaner middleware API with a unified error handling model (`echo.HTTPError`). Equally performant in benchmarks. Better support for custom context and request-scoped values |
-| **Test execution** | Docker-in-Docker | Full isolation per test run -- no host contamination, no shared filesystem state. Supports any language or test framework by swapping the base image. Containers are ephemeral and cleaned up after every run |
+| **Test execution** | Fork-based GitHub Actions | Full isolation without running privileged Docker containers. Tests execute on GitHub-hosted runners -- no local compute required. Supports any language/framework via GHA workflow customization. Eliminates the operational burden of Docker-in-Docker |
 | **Job queue** | Redis LIST/STREAM | No additional infrastructure required. `BRPOP` provides reliable blocking dequeue. Can upgrade to a dedicated library like Asynq (built on Redis) if features like retries, scheduled jobs, or dead-letter queues are needed |
 | **Frontend framework** | Next.js 15 App Router | React Server Components reduce client-side JavaScript bundle size. Built-in file-based routing with layouts simplifies page structure. Strong developer experience with hot reload, TypeScript support, and integrated API routes for BFF patterns |
 | **Database** | PostgreSQL 17 | Proven reliability for transactional workloads. Excellent Go driver support (`lib/pq`, `pgx`). JSONB columns allow flexible storage for test metadata and configuration without schema changes. Strong indexing and query planner for analytical queries on test results |

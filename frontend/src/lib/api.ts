@@ -20,6 +20,7 @@ export class ApiRequestError extends Error {
 }
 
 let refreshPromise: Promise<void> | null = null;
+let isRedirecting = false;
 
 async function refreshAccessToken(): Promise<void> {
   const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
@@ -29,6 +30,14 @@ async function refreshAccessToken(): Promise<void> {
   if (!res.ok) {
     throw new Error("refresh failed");
   }
+}
+
+function redirectToLogin() {
+  if (typeof window === "undefined") return;
+  // Prevent multiple redirects from racing API calls
+  if (isRedirecting) return;
+  isRedirecting = true;
+  window.location.replace("/login");
 }
 
 export async function api<T>(
@@ -66,18 +75,14 @@ export async function api<T>(
       });
 
       if (retryRes.status === 401) {
-        if (typeof window !== "undefined") {
-          window.location.replace("/login");
-        }
+        redirectToLogin();
         throw new ApiRequestError(401, { code: "UNAUTHORIZED", message: "Session expired" });
       }
 
       return parseResponse<T>(retryRes);
     } catch {
       refreshPromise = null;
-      if (typeof window !== "undefined") {
-        window.location.replace("/login");
-      }
+      redirectToLogin();
       throw new ApiRequestError(401, { code: "UNAUTHORIZED", message: "Session expired" });
     }
   }

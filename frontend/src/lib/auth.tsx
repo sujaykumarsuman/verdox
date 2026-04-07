@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
 import { api, ApiRequestError } from "./api";
+import { useSSE } from "@/hooks/use-sse";
 import type { User } from "@/types/user";
 
 const PUBLIC_PATHS = ["/", "/login", "/signup", "/forgot-password", "/reset-password", "/banned"];
@@ -30,25 +31,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Try to refresh on mount to restore session
   useEffect(() => {
     const init = async () => {
+      if (typeof window === "undefined") {
+        setIsLoading(false);
+        return;
+      }
+
+      const path = window.location.pathname;
+      const isPublic = PUBLIC_PATHS.some((p) => path === p);
+
+      // Skip auth requests on /banned to avoid 401 console errors
+      if (path === "/banned") {
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        await api("/v1/auth/refresh", { method: "POST" });
+        // Use raw fetch for refresh to avoid api() wrapper's redirect logic
+        const refreshRes = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost/api"}/v1/auth/refresh`,
+          { method: "POST", credentials: "include" }
+        );
+        if (!refreshRes.ok) {
+          throw new Error("refresh failed");
+        }
         const data = await api<User>("/v1/auth/me");
         setUser(data);
       } catch (err) {
-        // No valid session — redirect to appropriate page if on a protected route
+        // No valid session
         setUser(null);
-        if (typeof window !== "undefined") {
-          const path = window.location.pathname;
-          const isPublic = PUBLIC_PATHS.some((p) => path === p);
-          if (!isPublic) {
-            // Check if banned — redirect to /banned page
-            if (err instanceof ApiRequestError && err.code === "ACCOUNT_BANNED") {
-              window.location.replace("/banned");
-            } else {
-              window.location.replace("/login");
-            }
-            return;
+        if (!isPublic) {
+          if (err instanceof ApiRequestError && err.code === "ACCOUNT_BANNED") {
+            window.location.replace("/banned");
+          } else {
+            window.location.replace("/login");
           }
+          return;
         }
       } finally {
         setIsLoading(false);
@@ -90,6 +107,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUser(null);
   }, []);
+
+  // Force-ban handler: clears auth state and redirects to /banned
+  const forceBan = useCallback((reason?: string) => {
+    const currentUser = user;
+    setUser(null);
+    if (typeof window !== "undefined") {
+      // Store ban info including email for the banned page display
+      const banInfo: Record<string, unknown> = {};
+      if (reason) banInfo.ban_reason = reason;
+      if (currentUser?.email) banInfo.email = currentUser.email;
+      if (currentUser?.username) banInfo.username = currentUser.username;
+      sessionStorage.setItem("verdox_ban_info", JSON.stringify(banInfo));
+      window.location.replace("/banned");
+    }
+  }, [user]);
+
+  // SSE connection — active when authenticated
+  useSSE({
+    enabled: !!user,
+    onBanned: (data) => {
+      forceBan(data.reason as string | undefined);
+    },
+    onUnbanned: () => {
+      // Could show a toast if user is on banned page, but generally
+      // they'll just be able to log in again
+    },
+  });
 
   return (
     <AuthContext.Provider

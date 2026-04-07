@@ -16,19 +16,20 @@ import {
   RotateCcw,
   GitCommit,
   GitBranch,
+  GitFork,
+  CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useRepository, useBranches, useCommits, resyncRepository, retryClone, deleteRepository } from "@/hooks/use-repos";
-import { useTestSuites, runAllSuites, useDiscovery } from "@/hooks/use-tests";
+import { useRepository, useBranches, useCommits, resyncRepository, deleteRepository } from "@/hooks/use-repos";
+import { api } from "@/lib/api";
+import { useTestSuites, useLatestRuns, triggerRun, useDiscovery } from "@/hooks/use-tests";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BranchSelector } from "@/components/repository/branch-selector";
 import { SuiteCard } from "@/components/test/suite-card";
-import { CreateSuiteDialog } from "@/components/test/create-suite-dialog";
 import { DiscoveryPanel } from "@/components/test/discovery-panel";
 import { cn } from "@/lib/utils";
-import type { DiscoverySuggestion } from "@/types/test";
 
 export default function RepositoryDetailPage({
   params,
@@ -37,25 +38,39 @@ export default function RepositoryDetailPage({
 }) {
   const { id } = use(params);
   const { repo, isLoading: repoLoading, error: repoError, refetch: refetchRepo } = useRepository(id);
-  const isCloneReady = repo?.clone_status === "ready";
-  const { branches, isLoading: branchesLoading } = useBranches(id, isCloneReady);
+  const isForkReady = repo?.fork_status === "ready";
+  const { branches, isLoading: branchesLoading } = useBranches(id, isForkReady);
   const router = useRouter();
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [resyncing, setResyncing] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showCreateSuite, setShowCreateSuite] = useState(false);
-  const [suitePrefill, setSuitePrefill] = useState<DiscoverySuggestion | undefined>();
   const [runningAll, setRunningAll] = useState(false);
   const { suites, isLoading: suitesLoading, refetch: refetchSuites } = useTestSuites(id);
   const { discovery, isLoading: discovering, scan: scanForTests } = useDiscovery(id);
   const [showDiscovery, setShowDiscovery] = useState(true);
+  const [forkingRepo, setForkingRepo] = useState(false);
 
-  // Auto-select default branch when branches load
+  // Compute active branch early — needed by hooks below
   const activeBranch = selectedBranch || repo?.default_branch || "";
-  const { commits } = useCommits(id, isCloneReady ? activeBranch : "");
+  const { commits } = useCommits(id, isForkReady ? activeBranch : "");
   const latestCommit = commits.length > 0 ? commits[0] : null;
+
+  // Latest runs filtered by the currently selected branch
+  const { latestRuns, refetch: refetchRuns } = useLatestRuns(suites.map((s) => s.id), activeBranch);
+
+  const handleForkSetup = async () => {
+    setForkingRepo(true);
+    try {
+      await api(`/v1/repositories/${id}/fork`, { method: "POST" });
+      toast.success("Fork setup initiated — this may take a moment");
+      refetchRepo();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to setup fork");
+    } finally {
+      setForkingRepo(false);
+    }
+  };
 
   const handleResync = async () => {
     setResyncing(true);
@@ -67,19 +82,6 @@ export default function RepositoryDetailPage({
       toast.error(err instanceof Error ? err.message : "Failed to re-sync");
     } finally {
       setResyncing(false);
-    }
-  };
-
-  const handleRetryClone = async () => {
-    setRetrying(true);
-    try {
-      await retryClone(id);
-      toast.success("Clone retry started");
-      refetchRepo();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to retry clone");
-    } finally {
-      setRetrying(false);
     }
   };
 
@@ -159,7 +161,7 @@ export default function RepositoryDetailPage({
               {repo.github_full_name}
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
-            <CloneStatusBadge status={repo.clone_status} />
+            <ForkStatusBadge status={repo.fork_status} forkFullName={repo.fork_full_name} />
           </div>
           {repo.description && (
             <p className="text-[14px] text-text-secondary mt-2">
@@ -168,7 +170,7 @@ export default function RepositoryDetailPage({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {isCloneReady && (
+          {isForkReady && (
             <Button
               variant="secondary"
               size="sm"
@@ -202,45 +204,44 @@ export default function RepositoryDetailPage({
         </div>
       </div>
 
-      {/* Clone status banner */}
-      {repo.clone_status === "pending" && (
-        <div className="rounded-[8px] border border-yellow-300/30 bg-yellow-50/5 p-4 mb-6 flex items-center gap-3">
-          <Clock className="h-5 w-5 text-yellow-500" />
+      {/* Fork status banners — only show for non-ready states */}
+      {repo.fork_status === "forking" && (
+        <div className="rounded-[8px] border border-accent/30 bg-accent/5 p-4 mb-6 flex items-center gap-3">
+          <Loader2 className="h-5 w-5 text-accent animate-spin" />
           <p className="text-[14px] text-text-secondary">
-            Clone is pending. The repository will be cloned shortly.
+            Setting up fork... This may take a moment.
           </p>
         </div>
       )}
-      {repo.clone_status === "cloning" && (
-        <div className="rounded-[8px] border border-yellow-300/30 bg-yellow-50/5 p-4 mb-6 flex items-center gap-3">
-          <Loader2 className="h-5 w-5 text-yellow-500 animate-spin" />
-          <p className="text-[14px] text-text-secondary">
-            Cloning repository... This may take a minute.
-          </p>
-        </div>
-      )}
-      {repo.clone_status === "failed" && (
+      {repo.fork_status === "failed" && (
         <div className="rounded-[8px] border border-danger/30 bg-danger/5 p-4 mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <AlertCircle className="h-5 w-5 text-danger shrink-0" />
-            <p className="text-[14px] text-danger">
-              Clone failed. Check that the team PAT has access to this repository.
-            </p>
+            <AlertCircle className="h-5 w-5 text-danger" />
+            <p className="text-[14px] text-danger">Fork setup failed.</p>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleRetryClone}
-            loading={retrying}
-          >
+          <Button variant="secondary" size="sm" onClick={handleForkSetup} loading={forkingRepo}>
             <RotateCcw className="h-4 w-4" />
             Retry
           </Button>
         </div>
       )}
+      {repo.fork_status === "none" && (
+        <div className="rounded-[8px] border p-4 mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <GitFork className="h-5 w-5 text-text-secondary" />
+            <p className="text-[14px] text-text-secondary">
+              No fork configured. Fork this repo to use GitHub Actions testing.
+            </p>
+          </div>
+          <Button variant="secondary" size="sm" onClick={handleForkSetup} loading={forkingRepo}>
+            <GitFork className="h-4 w-4" />
+            Fork &amp; Setup
+          </Button>
+        </div>
+      )}
 
       {/* Repository info bar: branch selector + latest commit */}
-      {isCloneReady && (
+      {isForkReady && (
         <Card className="mb-6">
           <CardBody className="flex items-center justify-between gap-4 py-3">
             <div className="flex items-center gap-4">
@@ -274,7 +275,7 @@ export default function RepositoryDetailPage({
             Test Suites
           </h3>
           <div className="flex items-center gap-2">
-            {isCloneReady && (
+            {isForkReady && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -284,28 +285,59 @@ export default function RepositoryDetailPage({
                 Scan for Tests
               </Button>
             )}
-            {suites.length > 0 && isCloneReady && latestCommit && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={async () => {
-                  setRunningAll(true);
-                  try {
-                    await runAllSuites(id, activeBranch, latestCommit.sha);
-                    toast.success("All test suites triggered");
-                    refetchSuites();
-                  } catch (err) {
-                    toast.error(err instanceof Error ? err.message : "Failed to run suites");
+            {suites.length > 0 && isForkReady && latestCommit && (() => {
+              // Suites that can be triggered: not active, not already tested this commit
+              const runnableSuites = suites.filter((s) => {
+                const run = latestRuns[s.id];
+                if (run && (run.status === "queued" || run.status === "running")) return false;
+                if (run && run.commit_hash === latestCommit.sha) return false;
+                return true;
+              });
+
+              return (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    setRunningAll(true);
+                    try {
+                      let triggered = 0;
+                      await Promise.all(
+                        runnableSuites.map(async (s) => {
+                          try {
+                            await triggerRun(s.id, activeBranch, latestCommit.sha);
+                            triggered++;
+                          } catch (err) {
+                            toast.error(`${s.name}: ${err instanceof Error ? err.message : "Failed"}`);
+                          }
+                        })
+                      );
+                      if (triggered > 0) {
+                        toast.success(`${triggered} test suite${triggered > 1 ? "s" : ""} triggered`);
+                      }
+                      refetchSuites();
+                      refetchRuns();
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Failed to run suites");
+                    }
+                    setRunningAll(false);
+                  }}
+                  loading={runningAll}
+                  disabled={runnableSuites.length === 0}
+                  title={
+                    runnableSuites.length === 0
+                      ? "All suites already tested or in progress"
+                      : `Run ${runnableSuites.length} untested suite${runnableSuites.length > 1 ? "s" : ""}`
                   }
-                  setRunningAll(false);
-                }}
-                loading={runningAll}
-              >
-                Run All
-              </Button>
-            )}
-            {isCloneReady && (
-              <Button size="sm" onClick={() => setShowCreateSuite(true)}>
+                >
+                  Run All{runnableSuites.length < suites.length && runnableSuites.length > 0
+                    ? ` (${runnableSuites.length})`
+                    : ""}
+                </Button>
+              );
+            })()}
+            {isForkReady && (
+              <Button size="sm" onClick={() => router.push(`/repositories/${id}/suites/new`)}>
                 Create Suite
               </Button>
             )}
@@ -316,9 +348,8 @@ export default function RepositoryDetailPage({
         {discovery && showDiscovery && discovery.suggestions.length > 0 && (
           <DiscoveryPanel
             suggestions={discovery.suggestions}
-            onApply={(suggestion) => {
-              setSuitePrefill(suggestion);
-              setShowCreateSuite(true);
+            onApply={() => {
+              router.push(`/repositories/${id}/suites/new`);
             }}
             onDismiss={() => setShowDiscovery(false)}
           />
@@ -345,8 +376,8 @@ export default function RepositoryDetailPage({
             <p className="text-[14px] text-text-secondary mb-4">
               Create your first test suite to start running tests against this repository.
             </p>
-            {isCloneReady && (
-              <Button onClick={() => setShowCreateSuite(true)}>
+            {isForkReady && (
+              <Button onClick={() => router.push(`/repositories/${id}/suites/new`)}>
                 Create Suite
               </Button>
             )}
@@ -357,10 +388,11 @@ export default function RepositoryDetailPage({
               <SuiteCard
                 key={suite.id}
                 suite={suite}
+                latestRun={latestRuns[suite.id] || null}
                 repoId={id}
                 branch={activeBranch}
                 commitHash={latestCommit?.sha || ""}
-                onRunTriggered={refetchSuites}
+                onRunTriggered={() => { refetchSuites(); refetchRuns(); }}
                 onDeleted={refetchSuites}
               />
             ))}
@@ -368,27 +400,33 @@ export default function RepositoryDetailPage({
         )}
       </div>
 
-      <CreateSuiteDialog
-        repoId={id}
-        open={showCreateSuite}
-        onClose={() => { setShowCreateSuite(false); setSuitePrefill(undefined); }}
-        onSuccess={refetchSuites}
-        prefill={suitePrefill}
-      />
     </div>
   );
 }
 
-function CloneStatusBadge({ status }: { status: string }) {
+function ForkStatusBadge({ status, forkFullName }: { status: string; forkFullName?: string | null }) {
   const config: Record<string, { bg: string; text: string; label: string }> = {
-    ready: { bg: "bg-green-500/10", text: "text-green-600", label: "Cloned" },
-    pending: { bg: "bg-yellow-500/10", text: "text-yellow-600", label: "Pending" },
-    cloning: { bg: "bg-yellow-500/10", text: "text-yellow-600", label: "Cloning" },
-    failed: { bg: "bg-red-500/10", text: "text-red-600", label: "Failed" },
-    evicted: { bg: "bg-gray-500/10", text: "text-gray-600", label: "Evicted" },
+    ready: { bg: "bg-green-500/10", text: "text-green-600", label: "Fork Ready" },
+    none: { bg: "bg-gray-500/10", text: "text-gray-600", label: "No Fork" },
+    forking: { bg: "bg-yellow-500/10", text: "text-yellow-600", label: "Forking" },
+    failed: { bg: "bg-red-500/10", text: "text-red-600", label: "Fork Failed" },
   };
 
-  const c = config[status] || config.pending;
+  const c = config[status] || config.none;
+
+  if (status === "ready" && forkFullName) {
+    return (
+      <a
+        href={`https://github.com/${forkFullName}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-medium hover:opacity-80 transition-opacity", c.bg, c.text)}
+      >
+        <ExternalLink className="h-3 w-3" />
+        Fork
+      </a>
+    );
+  }
 
   return (
     <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-medium", c.bg, c.text)}>

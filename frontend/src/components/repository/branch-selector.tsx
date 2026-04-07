@@ -33,7 +33,7 @@ export function BranchSelector({
         onChange={(e) => onSelect(e.target.value)}
         className={cn(
           "appearance-none rounded-[4px] border bg-bg-primary pl-9 pr-8 py-2 text-[14px] text-text-primary",
-          "transition-colors duration-200 cursor-pointer",
+          "transition-colors duration-200 cursor-pointer max-w-[220px] truncate",
           "focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
         )}
       >

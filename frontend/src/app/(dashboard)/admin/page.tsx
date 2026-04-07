@@ -1,6 +1,7 @@
 "use client";
 
-import { Shield } from "lucide-react";
+import Link from "next/link";
+import { Shield, Mail } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useAdminStats } from "@/hooks/use-admin";
 import { StatsCards } from "@/components/admin/stats-cards";
@@ -35,9 +36,20 @@ export default function AdminPage() {
         <h1 className="font-display text-[30px] leading-[38px] tracking-[-0.01em] text-text-primary mb-1">
           {isMod ? "Mod Panel" : "Admin Panel"}
         </h1>
-        <p className="text-[14px] text-text-secondary">
-          {isMod ? "View users and system health." : "Manage users and monitor system health."}
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-[14px] text-text-secondary">
+            {isMod ? "View users and system health." : "Manage users and monitor system health."}
+          </p>
+          {!isMod && (
+            <Link
+              href="/admin/mail"
+              className="flex items-center gap-2 px-4 py-2 rounded-[6px] bg-accent text-white text-[14px] font-medium hover:bg-accent-light transition-colors"
+            >
+              <Mail className="h-4 w-4" />
+              Send Mail
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="mb-8">

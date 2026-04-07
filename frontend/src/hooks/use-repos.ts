@@ -79,6 +79,15 @@ export function useRepository(id: string) {
     fetchRepo();
   }, [fetchRepo]);
 
+  // Poll every 5s while fork status is non-terminal
+  useEffect(() => {
+    if (!repo) return;
+    if (repo.fork_status !== "forking") return;
+
+    const interval = setInterval(fetchRepo, 5000);
+    return () => clearInterval(interval);
+  }, [repo?.fork_status, fetchRepo]);
+
   return { repo, isLoading, error, refetch: fetchRepo };
 }
 
@@ -149,8 +158,4 @@ export async function deleteRepository(id: string): Promise<void> {
 
 export async function resyncRepository(id: string): Promise<void> {
   return api<void>(`/v1/repositories/${id}/resync`, { method: "POST" });
-}
-
-export async function retryClone(id: string): Promise<Repository> {
-  return api<Repository>(`/v1/repositories/${id}/retry-clone`, { method: "POST" });
 }

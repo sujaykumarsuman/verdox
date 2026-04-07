@@ -22,28 +22,22 @@ import (
 )
 
 var (
-	ErrPATNotConfigured = errors.New("team does not have a GitHub PAT configured")
+	ErrPATNotConfigured = errors.New("no GitHub PAT available (team PAT or service account)")
 	ErrDuplicateRepo    = errors.New("repository already added")
-	ErrCloneNotReady    = errors.New("repository clone is not ready")
 	ErrNotTeamMember    = errors.New("user is not a member of this team")
 	ErrNotTeamAdmin     = errors.New("user is not an admin of this team")
+	ErrForkNotReady     = errors.New("repository fork is not ready")
 )
-
-// CloneJob represents a repository clone task for the worker.
-type CloneJob struct {
-	RepoID uuid.UUID
-	TeamID uuid.UUID
-}
 
 type RepositoryService struct {
 	repoRepo       repository.RepositoryRepository
 	teamRepo       repository.TeamRepository
 	teamMemberRepo repository.TeamMemberRepository
 	githubService  *GitHubService
+	forkService    *ForkService
 	rdb            *redis.Client
 	cfg            *config.Config
 	log            zerolog.Logger
-	cloneCh        chan<- CloneJob
 }
 
 func NewRepositoryService(
@@ -51,21 +45,45 @@ func NewRepositoryService(
 	teamRepo repository.TeamRepository,
 	teamMemberRepo repository.TeamMemberRepository,
 	githubService *GitHubService,
+	forkService *ForkService,
 	rdb *redis.Client,
 	cfg *config.Config,
 	log zerolog.Logger,
-	cloneCh chan<- CloneJob,
 ) *RepositoryService {
 	return &RepositoryService{
 		repoRepo:       repoRepo,
 		teamRepo:       teamRepo,
 		teamMemberRepo: teamMemberRepo,
 		githubService:  githubService,
+		forkService:    forkService,
 		rdb:            rdb,
 		cfg:            cfg,
 		log:            log,
-		cloneCh:        cloneCh,
 	}
+}
+
+// resolvePAT returns the best available PAT: team PAT if configured, otherwise service account PAT.
+func (s *RepositoryService) resolvePAT(ctx context.Context, teamID uuid.UUID) (string, error) {
+	team, err := s.teamRepo.GetByID(ctx, teamID)
+	if err != nil {
+		return "", fmt.Errorf("get team: %w", err)
+	}
+
+	// Try team PAT first
+	if team.HasPAT() {
+		pat, err := encryption.Decrypt(*team.GithubPATEncrypted, team.GithubPATNonce, s.cfg.GithubTokenEncryptionKey)
+		if err != nil {
+			return "", fmt.Errorf("decrypt team pat: %w", err)
+		}
+		return pat, nil
+	}
+
+	// Fall back to service account PAT
+	if s.cfg.ServiceAccountPAT != "" {
+		return s.cfg.ServiceAccountPAT, nil
+	}
+
+	return "", ErrPATNotConfigured
 }
 
 func (s *RepositoryService) AddRepository(ctx context.Context, userID uuid.UUID, req *dto.AddRepositoryRequest) (*dto.RepositoryResponse, error) {
@@ -83,19 +101,10 @@ func (s *RepositoryService) AddRepository(ctx context.Context, userID uuid.UUID,
 		return nil, ErrNotTeamMember
 	}
 
-	// Load team and verify PAT
-	team, err := s.teamRepo.GetByID(ctx, teamID)
+	// Resolve PAT: team PAT → service account PAT fallback
+	pat, err := s.resolvePAT(ctx, teamID)
 	if err != nil {
-		return nil, fmt.Errorf("get team: %w", err)
-	}
-	if !team.HasPAT() {
-		return nil, ErrPATNotConfigured
-	}
-
-	// Decrypt PAT
-	pat, err := encryption.Decrypt(*team.GithubPATEncrypted, team.GithubPATNonce, s.cfg.GithubTokenEncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt pat: %w", err)
+		return nil, err
 	}
 
 	// Parse GitHub URL
@@ -116,15 +125,19 @@ func (s *RepositoryService) AddRepository(ctx context.Context, userID uuid.UUID,
 		if existing.IsActive {
 			return nil, ErrDuplicateRepo
 		}
-		// Reactivate the soft-deleted repo
+		// Reactivate
 		existing.IsActive = true
-		existing.CloneStatus = model.CloneStatusPending
 		existing.Description = &ghInfo.Description
 		existing.DefaultBranch = ghInfo.DefaultBranch
 		if err := s.repoRepo.Reactivate(ctx, existing); err != nil {
 			return nil, fmt.Errorf("reactivate repository: %w", err)
 		}
-		s.cloneCh <- CloneJob{RepoID: existing.ID, TeamID: teamID}
+		// Auto-fork in background
+		if s.forkService != nil && s.forkService.IsConfigured() {
+			go func() {
+				_ = s.forkService.SetupFork(context.Background(), existing.ID, ghInfo.FullName, ghInfo.DefaultBranch)
+			}()
+		}
 		resp := dto.NewRepositoryResponse(existing, teamID.String())
 		return &resp, nil
 	}
@@ -137,9 +150,9 @@ func (s *RepositoryService) AddRepository(ctx context.Context, userID uuid.UUID,
 		Name:           ghInfo.Name,
 		Description:    &desc,
 		DefaultBranch:  ghInfo.DefaultBranch,
-		CloneStatus:    model.CloneStatusPending,
 		IsActive:       true,
 	}
+
 	if err := s.repoRepo.Create(ctx, repo); err != nil {
 		return nil, fmt.Errorf("create repository: %w", err)
 	}
@@ -149,8 +162,16 @@ func (s *RepositoryService) AddRepository(ctx context.Context, userID uuid.UUID,
 		return nil, fmt.Errorf("add team repository: %w", err)
 	}
 
-	// Enqueue clone job
-	s.cloneCh <- CloneJob{RepoID: repo.ID, TeamID: teamID}
+	// Auto-fork in background
+	if s.forkService != nil && s.forkService.IsConfigured() {
+		go func() {
+			_ = s.forkService.SetupFork(context.Background(), repo.ID, ghInfo.FullName, ghInfo.DefaultBranch)
+		}()
+	}
+
+	s.log.Info().
+		Str("repo", ghInfo.FullName).
+		Msg("repository added, fork initiated")
 
 	resp := dto.NewRepositoryResponse(repo, teamID.String())
 	return &resp, nil
@@ -246,7 +267,6 @@ func (s *RepositoryService) UpdateRepository(ctx context.Context, userID, repoID
 		return nil, fmt.Errorf("update repository: %w", err)
 	}
 
-	// Re-fetch to get updated_at
 	repo, err = s.repoRepo.GetByID(ctx, repoID)
 	if err != nil {
 		return nil, err
@@ -273,41 +293,6 @@ func (s *RepositoryService) SoftDeleteRepository(ctx context.Context, userID, re
 	return s.repoRepo.SoftDelete(ctx, repoID)
 }
 
-func (s *RepositoryService) RetryClone(ctx context.Context, userID, repoID uuid.UUID) (*dto.RepositoryResponse, error) {
-	repo, err := s.repoRepo.GetByID(ctx, repoID)
-	if err != nil {
-		return nil, err
-	}
-
-	if repo.CloneStatus != model.CloneStatusFailed {
-		return nil, fmt.Errorf("can only retry failed clones")
-	}
-
-	teamID, err := s.repoRepo.GetTeamIDForRepository(ctx, repoID)
-	if err != nil {
-		return nil, err
-	}
-
-	isMember, err := s.teamMemberRepo.IsTeamMember(ctx, teamID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if !isMember {
-		return nil, ErrNotTeamMember
-	}
-
-	// Reset status and re-enqueue
-	if err := s.repoRepo.UpdateCloneStatus(ctx, repoID, model.CloneStatusPending); err != nil {
-		return nil, fmt.Errorf("reset clone status: %w", err)
-	}
-
-	s.cloneCh <- CloneJob{RepoID: repoID, TeamID: teamID}
-
-	repo.CloneStatus = model.CloneStatusPending
-	resp := dto.NewRepositoryResponse(repo, teamID.String())
-	return &resp, nil
-}
-
 func (s *RepositoryService) GetBranches(ctx context.Context, userID, repoID uuid.UUID) ([]dto.BranchResponse, error) {
 	repo, err := s.repoRepo.GetByID(ctx, repoID)
 	if err != nil {
@@ -327,10 +312,6 @@ func (s *RepositoryService) GetBranches(ctx context.Context, userID, repoID uuid
 		return nil, ErrNotTeamMember
 	}
 
-	if repo.CloneStatus != model.CloneStatusReady {
-		return nil, ErrCloneNotReady
-	}
-
 	// Check Redis cache
 	cacheKey := fmt.Sprintf("branches:%s", repoID.String())
 	cached, err := s.rdb.Get(ctx, cacheKey).Result()
@@ -341,18 +322,10 @@ func (s *RepositoryService) GetBranches(ctx context.Context, userID, repoID uuid
 		}
 	}
 
-	// Get team PAT for ls-remote
-	team, err := s.teamRepo.GetByID(ctx, teamID)
+	// Resolve PAT (team → service account fallback)
+	pat, err := s.resolvePAT(ctx, teamID)
 	if err != nil {
 		return nil, err
-	}
-	if !team.HasPAT() {
-		return nil, ErrPATNotConfigured
-	}
-
-	pat, err := encryption.Decrypt(*team.GithubPATEncrypted, team.GithubPATNonce, s.cfg.GithubTokenEncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt pat: %w", err)
 	}
 
 	// Use git ls-remote to list branches
@@ -384,7 +357,6 @@ func (s *RepositoryService) GetBranches(ctx context.Context, userID, repoID uuid
 		})
 	}
 
-	// Cache result
 	if data, err := json.Marshal(branches); err == nil {
 		s.rdb.Set(ctx, cacheKey, string(data), 5*time.Minute)
 	}
@@ -421,21 +393,13 @@ func (s *RepositoryService) GetCommits(ctx context.Context, userID, repoID uuid.
 		}
 	}
 
-	// Get team PAT
-	team, err := s.teamRepo.GetByID(ctx, teamID)
+	// Resolve PAT (team → service account fallback)
+	pat, err := s.resolvePAT(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
-	if !team.HasPAT() {
-		return nil, ErrPATNotConfigured
-	}
 
-	pat, err := encryption.Decrypt(*team.GithubPATEncrypted, team.GithubPATNonce, s.cfg.GithubTokenEncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt pat: %w", err)
-	}
-
-	// Fetch commits from GitHub API (shallow clones have no history)
+	// Fetch commits from GitHub API
 	owner, repoName, err := ParseGitHubURL("https://github.com/" + repo.GithubFullName)
 	if err != nil {
 		return nil, err
@@ -456,7 +420,6 @@ func (s *RepositoryService) GetCommits(ctx context.Context, userID, repoID uuid.
 		}
 	}
 
-	// Cache result
 	if data, err := json.Marshal(commits); err == nil {
 		s.rdb.Set(ctx, cacheKey, string(data), 2*time.Minute)
 	}
@@ -464,6 +427,7 @@ func (s *RepositoryService) GetCommits(ctx context.Context, userID, repoID uuid.
 	return commits, nil
 }
 
+// ResyncRepository syncs the fork with upstream and invalidates caches.
 func (s *RepositoryService) ResyncRepository(ctx context.Context, userID, repoID uuid.UUID) (*dto.ResyncResponse, error) {
 	repo, err := s.repoRepo.GetByID(ctx, repoID)
 	if err != nil {
@@ -483,29 +447,20 @@ func (s *RepositoryService) ResyncRepository(ctx context.Context, userID, repoID
 		return nil, ErrNotTeamMember
 	}
 
-	if repo.CloneStatus != model.CloneStatusReady || repo.LocalPath == nil {
-		return nil, ErrCloneNotReady
-	}
-
-	// Run git fetch
-	cmdCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(cmdCtx, "git", "-C", *repo.LocalPath, "fetch", "--all", "--prune")
-	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git fetch: %w", err)
+	// Re-push workflow on top of latest upstream HEAD (maintains single Verdox commit)
+	if repo.ForkFullName != nil && *repo.ForkFullName != "" && s.forkService != nil {
+		if err := s.forkService.ResyncFork(ctx, repoID, *repo.ForkFullName, repo.GithubFullName, repo.DefaultBranch); err != nil {
+			s.log.Warn().Err(err).Str("fork", *repo.ForkFullName).Msg("fork resync failed")
+		}
 	}
 
 	// Invalidate caches
 	s.rdb.Del(ctx, fmt.Sprintf("branches:%s", repoID.String()))
-	// Delete all commit caches for this repo
 	iter := s.rdb.Scan(ctx, 0, fmt.Sprintf("commits:%s:*", repoID.String()), 100).Iterator()
 	for iter.Next(ctx) {
 		s.rdb.Del(ctx, iter.Val())
 	}
 
-	// Get branch count from ls-remote
 	branches, _ := s.GetBranches(ctx, userID, repoID)
 
 	return &dto.ResyncResponse{

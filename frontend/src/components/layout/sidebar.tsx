@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Settings, Shield, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { LayoutDashboard, Users, Settings, Shield, PanelLeftClose, PanelLeftOpen, Search, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -11,6 +11,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/teams", label: "Teams", icon: Users },
   { href: "/teams/discover", label: "Discover", icon: Search },
+  { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

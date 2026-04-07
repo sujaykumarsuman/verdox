@@ -32,7 +32,7 @@ type Config struct {
 
 	LogLevel string `mapstructure:"LOG_LEVEL"`
 
-	RepoBasePath string `mapstructure:"VERDOX_REPO_BASE_PATH"`
+	RepoBasePath string `mapstructure:"VERDOX_REPO_BASE_PATH"` // deprecated: kept for backward compat
 
 	GithubTokenEncryptionKey string `mapstructure:"GITHUB_TOKEN_ENCRYPTION_KEY"`
 
@@ -42,6 +42,11 @@ type Config struct {
 
 	OpenAIAPIKey   string `mapstructure:"VERDOX_OPENAI_API_KEY"`
 	WebhookBaseURL string `mapstructure:"VERDOX_WEBHOOK_BASE_URL"`
+
+	// Service account for fork-based GHA execution
+	ServiceAccountPAT      string `mapstructure:"VERDOX_SERVICE_ACCOUNT_PAT"`
+	ServiceAccountUsername string `mapstructure:"VERDOX_SERVICE_ACCOUNT_USERNAME"`
+
 }
 
 func (c *Config) CORSOriginsList() []string {
@@ -89,6 +94,7 @@ func Load() (*Config, error) {
 		"GITHUB_TOKEN_ENCRYPTION_KEY",
 		"RUNNER_MAX_CONCURRENT", "RUNNER_MAX_TIMEOUT", "RUNNER_DEFAULT_IMAGE",
 		"VERDOX_OPENAI_API_KEY", "VERDOX_WEBHOOK_BASE_URL",
+		"VERDOX_SERVICE_ACCOUNT_PAT", "VERDOX_SERVICE_ACCOUNT_USERNAME",
 	} {
 		_ = viper.BindEnv(key)
 	}

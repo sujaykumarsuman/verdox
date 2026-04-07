@@ -74,11 +74,9 @@ func (s *TestRunService) TriggerRun(ctx context.Context, userID, suiteID uuid.UU
 		return nil, fmt.Errorf("get repo: %w", err)
 	}
 
-	// Container mode requires clone to be ready; GHA mode doesn't
-	if suite.ExecutionMode == model.ExecutionModeContainer {
-		if repo.CloneStatus != model.CloneStatusReady || repo.LocalPath == nil {
-			return nil, ErrCloneNotReady
-		}
+	// Fork must be ready before running tests
+	if repo.ForkStatus != model.ForkStatusReady {
+		return nil, ErrForkNotReady
 	}
 
 	// Verify team membership (not viewer)
@@ -242,7 +240,12 @@ func (s *TestRunService) GetRun(ctx context.Context, userID, runID uuid.UUID) (*
 		resultResps[i] = dto.NewTestResultResponse(&results[i])
 	}
 
-	runResp := dto.NewTestRunResponseWithGHA(run, repo.GithubFullName)
+	// Use fork full name for GHA URL (runs execute on the fork, not upstream)
+	ghaRepoName := repo.GithubFullName
+	if repo.ForkFullName != nil && *repo.ForkFullName != "" {
+		ghaRepoName = *repo.ForkFullName
+	}
+	runResp := dto.NewTestRunResponseWithGHA(run, ghaRepoName)
 
 	// Get triggered-by username
 	if run.TriggeredBy != nil {
@@ -373,6 +376,16 @@ func (s *TestRunService) GetRunLogs(ctx context.Context, userID, runID uuid.UUID
 		}
 	}
 
+	// Fallback: if no test results exist but the run has log_output stored
+	// directly, create a single entry so the frontend can display something
+	if len(logs) == 0 && run.LogOutput != nil && *run.LogOutput != "" {
+		logs = []dto.TestLogEntry{{
+			TestName:  "Test Output",
+			Status:    string(run.Status),
+			LogOutput: run.LogOutput,
+		}}
+	}
+
 	return &dto.RunLogsResponse{RunID: runID.String(), Logs: logs}, nil
 }
 
@@ -440,8 +453,8 @@ func (s *TestRunService) RunAll(ctx context.Context, userID, repoID uuid.UUID, r
 		return nil, fmt.Errorf("get repo: %w", err)
 	}
 
-	if repo.CloneStatus != model.CloneStatusReady || repo.LocalPath == nil {
-		return nil, ErrCloneNotReady
+	if repo.ForkStatus != model.ForkStatusReady {
+		return nil, ErrForkNotReady
 	}
 
 	teamID, err := s.repoRepo.GetTeamIDForRepository(ctx, repoID)

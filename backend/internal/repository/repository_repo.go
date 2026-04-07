@@ -19,8 +19,6 @@ type RepositoryRepository interface {
 	Update(ctx context.Context, repo *model.Repository) error
 	SoftDelete(ctx context.Context, id uuid.UUID) error
 	Reactivate(ctx context.Context, repo *model.Repository) error
-	UpdateCloneStatus(ctx context.Context, id uuid.UUID, status string) error
-	UpdateCloneResult(ctx context.Context, id uuid.UUID, localPath, status string) error
 	AddTeamRepository(ctx context.Context, teamID, repoID uuid.UUID, addedBy uuid.UUID) error
 	GetTeamIDForRepository(ctx context.Context, repoID uuid.UUID) (uuid.UUID, error)
 }
@@ -34,13 +32,13 @@ func NewRepositoryRepository(db *sqlx.DB) RepositoryRepository {
 }
 
 func (r *repositoryRepo) Create(ctx context.Context, repo *model.Repository) error {
-	query := `INSERT INTO repositories (github_repo_id, github_full_name, name, description, default_branch, clone_status)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, created_at, updated_at`
+	query := `INSERT INTO repositories (github_repo_id, github_full_name, name, description, default_branch)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, clone_status, fork_status, created_at, updated_at`
 	return r.db.QueryRowxContext(ctx, query,
 		repo.GithubRepoID, repo.GithubFullName, repo.Name,
-		repo.Description, repo.DefaultBranch, repo.CloneStatus,
-	).Scan(&repo.ID, &repo.CreatedAt, &repo.UpdatedAt)
+		repo.Description, repo.DefaultBranch,
+	).Scan(&repo.ID, &repo.CloneStatus, &repo.ForkStatus, &repo.CreatedAt, &repo.UpdatedAt)
 }
 
 func (r *repositoryRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Repository, error) {
@@ -112,25 +110,12 @@ func (r *repositoryRepo) SoftDelete(ctx context.Context, id uuid.UUID) error {
 
 func (r *repositoryRepo) Reactivate(ctx context.Context, repo *model.Repository) error {
 	query := `UPDATE repositories
-		SET is_active = true, clone_status = $1, description = $2, default_branch = $3, local_path = NULL, updated_at = now()
-		WHERE id = $4
+		SET is_active = true, description = $1, default_branch = $2, fork_status = 'none', updated_at = now()
+		WHERE id = $3
 		RETURNING updated_at`
 	return r.db.QueryRowxContext(ctx, query,
-		repo.CloneStatus, repo.Description, repo.DefaultBranch, repo.ID,
+		repo.Description, repo.DefaultBranch, repo.ID,
 	).Scan(&repo.UpdatedAt)
-}
-
-func (r *repositoryRepo) UpdateCloneStatus(ctx context.Context, id uuid.UUID, status string) error {
-	_, err := r.db.ExecContext(ctx,
-		"UPDATE repositories SET clone_status = $1, updated_at = now() WHERE id = $2", status, id)
-	return err
-}
-
-func (r *repositoryRepo) UpdateCloneResult(ctx context.Context, id uuid.UUID, localPath, status string) error {
-	_, err := r.db.ExecContext(ctx,
-		"UPDATE repositories SET local_path = $1, clone_status = $2, updated_at = now() WHERE id = $3",
-		localPath, status, id)
-	return err
 }
 
 func (r *repositoryRepo) AddTeamRepository(ctx context.Context, teamID, repoID uuid.UUID, addedBy uuid.UUID) error {

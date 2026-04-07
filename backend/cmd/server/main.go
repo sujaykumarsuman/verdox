@@ -19,10 +19,8 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/handler"
 	mw "github.com/sujaykumarsuman/verdox/backend/internal/middleware"
 	"github.com/sujaykumarsuman/verdox/backend/internal/queue"
-	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
 	"github.com/sujaykumarsuman/verdox/backend/internal/runner"
 	"github.com/sujaykumarsuman/verdox/backend/internal/service"
-	"github.com/sujaykumarsuman/verdox/backend/internal/worker"
 	"github.com/sujaykumarsuman/verdox/backend/pkg/logger"
 	v "github.com/sujaykumarsuman/verdox/backend/pkg/validator"
 )
@@ -38,6 +36,11 @@ func main() {
 	// Init logger
 	log := logger.New(cfg.LogLevel)
 	log.Info().Str("env", cfg.AppEnv).Msg("starting verdox server")
+
+	// Validate service account configuration
+	if cfg.ServiceAccountPAT == "" || cfg.ServiceAccountUsername == "" {
+		log.Warn().Msg("VERDOX_SERVICE_ACCOUNT_PAT or VERDOX_SERVICE_ACCOUNT_USERNAME not set — fork-based test execution will not work")
+	}
 
 	// Connect Postgres
 	db, err := sqlx.Connect("pgx", cfg.DatabaseURL)
@@ -89,16 +92,14 @@ func main() {
 	// Auth routes
 	registerAuthRoutes(e, db, rdb, cfg, log)
 
-	// Clone worker
-	cloneCh := make(chan service.CloneJob, 100)
-	cloneWorker := worker.NewCloneWorker(
-		repository.NewRepositoryRepository(db),
-		repository.NewTeamRepository(db),
-		cfg, log,
-	)
-	workerCtx, workerCancel := context.WithCancel(context.Background())
-	defer workerCancel()
-	go cloneWorker.Start(workerCtx, cloneCh)
+	// SSE routes
+	registerSSERoutes(e, db, rdb, cfg, log)
+
+	// Notification routes
+	registerNotificationRoutes(e, db, rdb, cfg, log)
+
+	// Fork routes
+	registerForkRoutes(e, db, rdb, cfg, log)
 
 	// Redis queue for test runs
 	redisQueue := queue.NewRedisQueue(rdb, cfg.RunnerMaxTimeout, log)
@@ -106,10 +107,16 @@ func main() {
 	// GHA poller for tracking dispatched GitHub Actions workflows
 	ghaPoller := runner.NewGHAPoller(db, log)
 
-	// Executors
-	containerExec := runner.NewContainerExecutor(cfg, rdb, redisQueue, log)
-	var ghaExec *runner.GHAExecutor
-	ghaExec = runner.NewGHAExecutor(cfg, log, ghaPoller.Register)
+	// Fork GHA executor (uses service account)
+	forkService := service.NewForkService(cfg, db, log)
+	var forkGHAExec *runner.ForkGHAExecutor
+	if forkService.IsConfigured() {
+		forkGHAExec = runner.NewForkGHAExecutor(forkService, cfg, log, ghaPoller.Register)
+		log.Info().Msg("fork GHA executor enabled (service account configured)")
+
+		// Recover repos stuck in "forking" state (e.g., from server restart during setup)
+		go forkService.RecoverStuckForks(context.Background())
+	}
 
 	// User settings & Admin routes
 	registerUserRoutes(e, db, rdb, cfg, log)
@@ -117,7 +124,7 @@ func main() {
 
 	// Team & Repository routes
 	registerTeamRoutes(e, db, rdb, cfg, log)
-	registerRepositoryRoutes(e, db, rdb, cfg, log, cloneCh)
+	registerRepositoryRoutes(e, db, rdb, cfg, log)
 
 	// Test suite & run routes
 	registerTestRoutes(e, db, rdb, cfg, log, redisQueue)
@@ -130,8 +137,8 @@ func main() {
 		registerDiscoveryRoutes(e, db, rdb, cfg, log)
 	}
 
-	// Worker pool (embedded in backend process)
-	pool := runner.NewWorkerPool(cfg, redisQueue, db, rdb, log, containerExec, ghaExec)
+	// Worker pool
+	pool := runner.NewWorkerPool(cfg, redisQueue, db, rdb, log, forkGHAExec)
 	poolCtx, poolCancel := context.WithCancel(context.Background())
 	defer poolCancel()
 	pool.Start(poolCtx)
@@ -161,7 +168,6 @@ func main() {
 	<-quit
 	log.Info().Msg("shutting down server...")
 
-	// Stop GHA poller and worker pool
 	ghaPoller.Shutdown()
 	pool.Shutdown()
 

@@ -1,6 +1,6 @@
 import type { PaginationMeta } from "@/types/repository";
 
-export type ExecutionMode = "container" | "gha";
+export type ExecutionMode = "fork_gha";
 export type TestRunStatus = "queued" | "running" | "passed" | "failed" | "cancelled";
 export type TestResultStatus = "pass" | "fail" | "skip" | "error";
 
@@ -16,6 +16,7 @@ export interface TestSuite {
   env_vars: Record<string, string>;
   config_path: string | null;
   timeout_seconds: number;
+  workflow_config: WorkflowConfig;
   created_at: string;
   updated_at: string;
 }
@@ -80,6 +81,40 @@ export interface RunLogEntry {
 export interface RunLogsResponse {
   run_id: string;
   logs: RunLogEntry[];
+}
+
+export interface WorkflowService {
+  name: string;
+  image: string;
+  ports?: string[];
+  env?: Record<string, string>;
+}
+
+export interface WorkflowStep {
+  name: string;
+  run?: string;
+  uses?: string;
+  with?: Record<string, string>;
+}
+
+export interface WorkflowMatrix {
+  dimensions: Record<string, string[]>;
+  fail_fast: boolean;
+}
+
+export interface WorkflowConcurrency {
+  group: string;
+  cancel_in_progress: boolean;
+}
+
+export interface WorkflowConfig {
+  runner_os: string;
+  custom_runner?: string;
+  env_vars?: Record<string, string>;
+  services?: WorkflowService[];
+  setup_steps?: WorkflowStep[];
+  matrix?: WorkflowMatrix | null;
+  concurrency?: WorkflowConcurrency | null;
 }
 
 export interface DiscoverySuggestion {

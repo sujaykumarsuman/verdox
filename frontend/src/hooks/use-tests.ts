@@ -83,6 +83,49 @@ export async function deleteTestSuite(suiteId: string): Promise<void> {
   return api<void>(`/v1/suites/${suiteId}`, { method: "DELETE" });
 }
 
+// --- Latest Runs (per-suite, with polling) ---
+
+export function useLatestRuns(suiteIds: string[], branch?: string) {
+  const [latestRuns, setLatestRuns] = useState<Record<string, TestRun | null>>({});
+
+  const fetchAll = useCallback(async () => {
+    if (suiteIds.length === 0) return;
+    const results: Record<string, TestRun | null> = {};
+    const branchParam = branch ? `&branch=${encodeURIComponent(branch)}` : "";
+    await Promise.all(
+      suiteIds.map(async (sid) => {
+        try {
+          const data = await api<TestRunListResponse>(
+            `/v1/suites/${sid}/runs?page=1&per_page=1${branchParam}`
+          );
+          results[sid] = data.runs && data.runs.length > 0 ? data.runs[0] : null;
+        } catch {
+          results[sid] = null;
+        }
+      })
+    );
+    setLatestRuns(results);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suiteIds.join(","), branch]);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  // Poll every 5s while any run is non-terminal (queued/running)
+  useEffect(() => {
+    const hasActive = Object.values(latestRuns).some(
+      (r) => r && (r.status === "queued" || r.status === "running")
+    );
+    if (!hasActive) return;
+
+    const interval = setInterval(fetchAll, 5000);
+    return () => clearInterval(interval);
+  }, [latestRuns, fetchAll]);
+
+  return { latestRuns, refetch: fetchAll };
+}
+
 // --- Runs ---
 
 export function useTestRuns(suiteId: string, page: number = 1) {

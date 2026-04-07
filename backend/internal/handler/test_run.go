@@ -152,8 +152,8 @@ func (h *TestRunHandler) mapError(c echo.Context, err error) error {
 		return response.Error(c, http.StatusConflict, "CONFLICT", "A run for this commit is already queued or running")
 	case errors.Is(err, service.ErrRunNotCancellable):
 		return response.Error(c, http.StatusConflict, "CONFLICT", "Run is already in a terminal state")
-	case errors.Is(err, service.ErrCloneNotReady):
-		return response.Error(c, http.StatusUnprocessableEntity, "CLONE_NOT_READY", "Repository clone is not ready")
+	case errors.Is(err, service.ErrForkNotReady):
+		return response.Error(c, http.StatusUnprocessableEntity, "FORK_NOT_READY", "Repository fork is not ready")
 	case errors.Is(err, service.ErrNotTeamMember):
 		return response.Error(c, http.StatusForbidden, "FORBIDDEN", "Not a member of this team")
 	case errors.Is(err, service.ErrNotTeamAdmin):

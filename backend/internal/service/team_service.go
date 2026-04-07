@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -34,6 +35,8 @@ type TeamService struct {
 	joinReqRepo  repository.TeamJoinRequestRepository
 	teamRepoRepo repository.TeamRepoAssignmentRepository
 	repoRepo     repository.RepositoryRepository
+	userRepo     repository.UserRepository
+	notifService *NotificationService
 	log          zerolog.Logger
 }
 
@@ -43,6 +46,8 @@ func NewTeamService(
 	joinReqRepo repository.TeamJoinRequestRepository,
 	teamRepoRepo repository.TeamRepoAssignmentRepository,
 	repoRepo repository.RepositoryRepository,
+	userRepo repository.UserRepository,
+	notifService *NotificationService,
 	log zerolog.Logger,
 ) *TeamService {
 	return &TeamService{
@@ -51,6 +56,8 @@ func NewTeamService(
 		joinReqRepo:  joinReqRepo,
 		teamRepoRepo: teamRepoRepo,
 		repoRepo:     repoRepo,
+		userRepo:     userRepo,
+		notifService: notifService,
 		log:          log,
 	}
 }
@@ -374,6 +381,9 @@ func (s *TeamService) SubmitJoinRequest(ctx context.Context, teamID, userID uuid
 		return nil, fmt.Errorf("create join request: %w", err)
 	}
 
+	// Notify team admins and maintainers about the new join request
+	go s.notifyTeamAdminsJoinRequest(context.Background(), teamID, userID, req.ID)
+
 	return &dto.JoinRequestResponse{
 		ID:        req.ID.String(),
 		User:      dto.JoinRequestUserResponse{ID: userID.String()},
@@ -462,6 +472,9 @@ func (s *TeamService) ReviewJoinRequest(ctx context.Context, requestID, reviewer
 		return fmt.Errorf("update join request status: %w", err)
 	}
 
+	// Notify the requester about the review outcome
+	go s.notifyRequesterReviewed(context.Background(), req.TeamID, req.UserID, reviewerID, string(newStatus))
+
 	return nil
 }
 
@@ -525,4 +538,104 @@ func isValidRole(role string) bool {
 		return true
 	}
 	return false
+}
+
+// notifyTeamAdminsJoinRequest sends a push notification to all team admins and maintainers
+// when a new join request is submitted.
+func (s *TeamService) notifyTeamAdminsJoinRequest(ctx context.Context, teamID, requesterID, requestID uuid.UUID) {
+	if s.notifService == nil {
+		return
+	}
+
+	team, err := s.teamRepo.GetByID(ctx, teamID)
+	if err != nil {
+		s.log.Error().Err(err).Str("team_id", teamID.String()).Msg("failed to get team for join request notification")
+		return
+	}
+
+	requester, err := s.userRepo.GetByID(ctx, requesterID)
+	if err != nil {
+		s.log.Error().Err(err).Str("user_id", requesterID.String()).Msg("failed to get requester for join request notification")
+		return
+	}
+
+	members, err := s.memberRepo.ListMembersByTeam(ctx, teamID)
+	if err != nil {
+		s.log.Error().Err(err).Str("team_id", teamID.String()).Msg("failed to list members for join request notification")
+		return
+	}
+
+	actionType := "view_join_requests"
+	payload, _ := json.Marshal(map[string]string{
+		"team_id":    teamID.String(),
+		"team_slug":  team.Slug,
+		"request_id": requestID.String(),
+	})
+	rawPayload := json.RawMessage(payload)
+
+	for _, m := range members {
+		if m.Status != model.TeamMemberStatusApproved {
+			continue
+		}
+		if m.Role != model.TeamMemberRoleAdmin && m.Role != model.TeamMemberRoleMaintainer {
+			continue
+		}
+
+		notif := &model.Notification{
+			UserID:        m.UserID,
+			Type:          model.NotificationTeamJoinRequest,
+			Subject:       fmt.Sprintf("%s wants to join %s", requester.Username, team.Name),
+			Body:          fmt.Sprintf("%s has requested to join team %s. Please review the request.", requester.Username, team.Name),
+			ActionType:    &actionType,
+			ActionPayload: &rawPayload,
+			SenderID:      &requesterID,
+		}
+		if err := s.notifService.CreateAndPublish(ctx, notif); err != nil {
+			s.log.Error().Err(err).Str("admin_id", m.UserID.String()).Msg("failed to send join request notification")
+		}
+	}
+}
+
+// notifyRequesterReviewed sends a push notification to the join request author
+// when their request is approved or rejected.
+func (s *TeamService) notifyRequesterReviewed(ctx context.Context, teamID, requesterID, reviewerID uuid.UUID, status string) {
+	if s.notifService == nil {
+		return
+	}
+
+	team, err := s.teamRepo.GetByID(ctx, teamID)
+	if err != nil {
+		s.log.Error().Err(err).Str("team_id", teamID.String()).Msg("failed to get team for review notification")
+		return
+	}
+
+	var subject, body string
+	if status == string(model.TeamMemberStatusApproved) {
+		subject = fmt.Sprintf("Welcome to %s!", team.Name)
+		body = fmt.Sprintf("Your request to join team %s has been approved. You are now a member.", team.Name)
+	} else {
+		subject = fmt.Sprintf("Join request for %s was declined", team.Name)
+		body = fmt.Sprintf("Your request to join team %s has been declined.", team.Name)
+	}
+
+	actionType := "view_team"
+	payload, _ := json.Marshal(map[string]string{
+		"team_id":   teamID.String(),
+		"team_slug": team.Slug,
+		"status":    status,
+	})
+	rawPayload := json.RawMessage(payload)
+
+	notif := &model.Notification{
+		UserID:        requesterID,
+		Type:          model.NotificationTeamJoinRequest,
+		Subject:       subject,
+		Body:          body,
+		ActionType:    &actionType,
+		ActionPayload: &rawPayload,
+		SenderID:      &reviewerID,
+	}
+	if err := s.notifService.CreateAndPublish(ctx, notif); err != nil {
+		s.log.Error().Err(err).Str("user_id", requesterID.String()).Msg("failed to send review notification")
+	}
 }

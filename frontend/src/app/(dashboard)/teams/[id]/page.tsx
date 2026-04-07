@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { useTeamDetail, deleteTeam } from "@/hooks/use-teams";
+import { useTeamDetail, deleteTeam, useJoinRequests } from "@/hooks/use-teams";
 import { setPAT, revokePAT } from "@/hooks/use-pat";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,6 +148,13 @@ export default function TeamDetailPage({
   const isAdmin = myRole === "admin";
   const isAdminOrMaintainer = isAdmin || myRole === "maintainer";
 
+  // Fetch pending join requests count for admins/maintainers
+  const { requests: pendingRequests } = useJoinRequests(
+    isAdminOrMaintainer ? teamId : "",
+    "pending"
+  );
+  const pendingCount = pendingRequests.length;
+
   if (isLoading) {
     return (
       <div className="max-w-4xl">
@@ -215,6 +222,11 @@ export default function TeamDetailPage({
           >
             <ClipboardList className="h-4 w-4" />
             Join Requests
+            {pendingCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-accent text-white text-[11px] font-semibold">
+                {pendingCount}
+              </span>
+            )}
           </Link>
         )}
       </div>
@@ -313,8 +325,8 @@ export default function TeamDetailPage({
                 </h2>
               </div>
               <p className="text-[14px] text-text-secondary">
-                Configure a Personal Access Token to allow Verdox to access your
-                team&apos;s GitHub repositories.
+                Optionally configure a team-level PAT to access private repositories.
+                The Verdox service account PAT is used by default for forking and running tests.
               </p>
             </CardHeader>
             <CardBody className="space-y-4">
@@ -327,7 +339,7 @@ export default function TeamDetailPage({
                 <div className="flex items-center gap-2 p-3 rounded-[6px] bg-yellow-500/5 border border-yellow-300/20">
                   <KeyRound className="h-4 w-4 text-yellow-600" />
                   <span className="text-[14px] text-text-primary">
-                    No GitHub PAT configured. Add one below to enable repository access.
+                    No team PAT configured. The Verdox service account PAT is being used. Add a team PAT below only if your repos need a different account for access.
                   </span>
                 </div>
               ) : patStatus?.valid ? (

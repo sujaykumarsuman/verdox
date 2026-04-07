@@ -71,16 +71,6 @@ services:
     ports:
       - "6379:6379"
 
-  # ──────────────────────────────────────────────
-  # Runner -- DinD only, no host socket in dev
-  # ──────────────────────────────────────────────
-  runner:
-    volumes: !reset
-      - repodata:/var/lib/verdox/repositories:ro
-    environment:
-      - RUNNER_MAX_CONCURRENT=2
-      - RUNNER_MAX_TIMEOUT=600
-
 volumes:
   pgdata:
   redisdata:
