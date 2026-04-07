@@ -67,6 +67,9 @@ export function useAdminUsers(
 
   useEffect(() => {
     fetchUsers();
+    // Periodic refresh to pick up cross-session changes (team count, bans, etc.)
+    const interval = setInterval(fetchUsers, 30000);
+    return () => clearInterval(interval);
   }, [fetchUsers]);
 
   return { data, isLoading, error, refetch: fetchUsers };

@@ -1,4 +1,4 @@
-export type CloneStatus = "pending" | "cloning" | "ready" | "failed" | "evicted";
+export type ForkStatus = "none" | "forking" | "ready" | "failed";
 
 export interface Repository {
   id: string;
@@ -7,7 +7,10 @@ export interface Repository {
   name: string;
   description: string | null;
   default_branch: string;
-  clone_status: CloneStatus;
+  fork_status: ForkStatus;
+  fork_full_name: string | null;
+  fork_synced_at: string | null;
+  fork_workflow_id: string | null;
   is_active: boolean;
   team_id: string;
   created_at: string;

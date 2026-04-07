@@ -25,6 +25,37 @@ Make sure you have the following tools installed before proceeding.
 > go install github.com/cosmtrek/air@latest
 > ```
 
+### GitHub Service Account (Required for Test Execution)
+
+Verdox uses a dedicated GitHub service account to fork repositories and run
+tests via GitHub Actions. You must set this up before running tests.
+
+1. **Create a GitHub account** for the service account (e.g., `verdox-bot`,
+   `yourorg-verdox-ci`). This should be a separate account, not a personal
+   account.
+
+2. **Generate a Personal Access Token (classic)** on the service account:
+   - Go to **GitHub** > **Settings** > **Developer Settings** > **Personal access tokens** > **Tokens (classic)**.
+   - Click **Generate new token (classic)**.
+   - Select the following scopes:
+
+   | Scope | Required | Why |
+   |-------|----------|-----|
+   | `repo` | Yes | Fork repos, push workflow files, access private repos |
+   | `workflow` | Yes | Dispatch and manage GitHub Actions workflows |
+   | `read:org` | Yes | Read org membership for private repo access |
+
+   - Set an appropriate expiration (90 days recommended).
+   - Copy the generated token.
+
+3. **Add the service account to your GitHub organization** as a member with
+   read access to the repositories you want to test.
+
+4. **Configure in `.env`:** Set `VERDOX_SERVICE_ACCOUNT_PAT` and
+   `VERDOX_SERVICE_ACCOUNT_USERNAME` (see Section 2).
+
+For more details on PAT configuration, see [GITHUB-PAT-GUIDE.md](./GITHUB-PAT-GUIDE.md).
+
 ---
 
 ## 2. Clone & Configure
@@ -37,17 +68,23 @@ cp .env.example .env
 
 Open `.env` in your editor and set the required values:
 
-| Variable | What to do |
-|----------|------------|
-| `JWT_SECRET` | Generate a secure secret: `openssl rand -hex 32` |
-| `POSTGRES_PASSWORD` | Pick a password for the local database |
-| `ROOT_EMAIL` | Email for the root user account (created on first startup) |
-| `ROOT_PASSWORD` | Password for the root user account |
-| `VERDOX_REPO_BASE_PATH` | Local path where cloned repositories are stored (e.g., `./data/repositories`) |
+| Variable | Required | What to do |
+|----------|----------|------------|
+| `JWT_SECRET` | Yes | Generate a secure secret: `openssl rand -hex 32` |
+| `POSTGRES_PASSWORD` | Yes | Pick a password for the local database |
+| `ROOT_EMAIL` | Yes | Email for the root user account (created on first startup) |
+| `ROOT_PASSWORD` | Yes | Password for the root user account |
+| `VERDOX_SERVICE_ACCOUNT_PAT` | Yes | GitHub PAT for the Verdox service account (scopes: `repo`, `workflow`, `read:org`) |
+| `VERDOX_SERVICE_ACCOUNT_USERNAME` | Yes | GitHub username of the service account (e.g., `verdox-bot`) |
+| `VERDOX_WEBHOOK_BASE_URL` | No | Public URL for GHA webhook callbacks (e.g., `https://verdox.example.com/api/v1/webhooks/gha`). If not set, polling-only mode is used |
+| `GITHUB_TOKEN_ENCRYPTION_KEY` | Yes | AES-256-GCM key for encrypting team PATs: `openssl rand -hex 32` |
 
 Everything else in `.env.example` ships with sensible defaults that work out of the box with Docker Compose.
 
-> **Note:** GitHub PAT is not configured in `.env`. After logging in, a **team admin** configures the GitHub PAT in **Team Settings** (on the team detail page). See [GITHUB-PAT-GUIDE.md](./GITHUB-PAT-GUIDE.md) for detailed instructions.
+> **Note:** Team-level GitHub PATs are configured separately by team admins in
+> **Team Settings** after logging in. The service account PAT in `.env` is for
+> fork and workflow operations. See [GITHUB-PAT-GUIDE.md](./GITHUB-PAT-GUIDE.md)
+> for detailed instructions.
 
 ---
 
@@ -74,7 +111,7 @@ Once the services are up, verify that everything is healthy:
 | Backend API | [http://localhost:8080/api/v1/health](http://localhost:8080/api/v1/health) |
 | Full stack via Nginx | [http://localhost](http://localhost) |
 
-Docker Compose starts the following services: **nginx**, **frontend**, **backend**, **postgres**, **redis**, and **runner**.
+Docker Compose starts the following services: **nginx**, **frontend**, **backend**, **postgres**, and **redis**.
 
 ---
 
@@ -151,13 +188,24 @@ The frontend will open at `http://localhost:3000`.
 
 ## 6. GitHub PAT Setup
 
-GitHub integration uses a Personal Access Token (PAT) configured at the **team level** by a team admin. No OAuth app registration is required.
+GitHub integration uses two types of PATs:
 
-After logging in, a team admin navigates to their **team detail page** and configures the GitHub PAT in the PAT settings section. The PAT needs the `repo` scope for private repos. All team members benefit from the configured PAT when adding repositories.
+### Service Account PAT (Required)
 
-For detailed instructions on creating and maintaining a GitHub PAT, see [GITHUB-PAT-GUIDE.md](./GITHUB-PAT-GUIDE.md).
+This is configured in `.env` and is used by Verdox to fork repositories and
+dispatch GitHub Actions workflows. See Section 1 (Prerequisites) for setup
+instructions.
 
-**Quick steps:**
+### Team PAT (Optional)
+
+A team-level PAT configured by team admins in **Team Settings**. This is
+optional and used for accessing private repositories that the service account
+cannot see. After logging in, a team admin navigates to their **team detail
+page** and configures the GitHub PAT in the PAT settings section.
+
+For detailed instructions on creating and maintaining GitHub PATs, see [GITHUB-PAT-GUIDE.md](./GITHUB-PAT-GUIDE.md).
+
+**Quick steps for team PAT:**
 
 1. Go to **GitHub** > **Settings** > **Developer Settings** > **Personal access tokens** > **Tokens (classic)**.
 2. Click **Generate new token**.
@@ -268,6 +316,8 @@ verdox/
 | Hot reload not working | Check Docker volume mounts in `docker-compose.dev.yml`, then restart with `make dev` |
 | Redis connection refused | Verify Redis is running: `docker ps \| grep redis` |
 | Nginx 502 Bad Gateway | Backend may still be starting -- wait a few seconds and refresh |
+| Service account PAT errors | Verify `VERDOX_SERVICE_ACCOUNT_PAT` in `.env` is valid and has `repo`, `workflow`, `read:org` scopes |
+| Fork creation fails | Ensure the service account has access to the target repository's organization |
 
 ---
 

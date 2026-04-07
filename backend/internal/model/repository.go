@@ -6,12 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// Fork status values.
 const (
-	CloneStatusPending = "pending"
-	CloneStatusCloning = "cloning"
-	CloneStatusReady   = "ready"
-	CloneStatusFailed  = "failed"
-	CloneStatusEvicted = "evicted"
+	ForkStatusNone    = "none"
+	ForkStatusForking = "forking"
+	ForkStatusReady   = "ready"
+	ForkStatusFailed  = "failed"
 )
 
 type Repository struct {
@@ -21,9 +21,14 @@ type Repository struct {
 	Name            string     `db:"name" json:"name"`
 	Description     *string    `db:"description" json:"description"`
 	DefaultBranch   string     `db:"default_branch" json:"default_branch"`
-	LocalPath       *string    `db:"local_path" json:"local_path,omitempty"`
-	CloneStatus     string     `db:"clone_status" json:"clone_status"`
+	LocalPath       *string    `db:"local_path" json:"-"`
+	CloneStatus     string     `db:"clone_status" json:"-"`
 	IsActive        bool       `db:"is_active" json:"is_active"`
+	ForkFullName    *string    `db:"fork_full_name" json:"fork_full_name"`
+	ForkStatus      string     `db:"fork_status" json:"fork_status"`
+	ForkSyncedAt    *time.Time `db:"fork_synced_at" json:"fork_synced_at"`
+	ForkWorkflowID  *string    `db:"fork_workflow_id" json:"fork_workflow_id"`
+	ForkHeadSHA     *string    `db:"fork_head_sha" json:"fork_head_sha"`
 	CreatedAt       time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
 }

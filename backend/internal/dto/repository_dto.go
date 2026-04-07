@@ -16,17 +16,20 @@ type UpdateRepositoryRequest struct {
 }
 
 type RepositoryResponse struct {
-	ID             string  `json:"id"`
-	GithubRepoID   int64   `json:"github_repo_id"`
-	GithubFullName string  `json:"github_full_name"`
-	Name           string  `json:"name"`
-	Description    *string `json:"description"`
-	DefaultBranch  string  `json:"default_branch"`
-	CloneStatus    string  `json:"clone_status"`
-	IsActive       bool    `json:"is_active"`
-	TeamID         string  `json:"team_id"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	ID              string  `json:"id"`
+	GithubRepoID    int64   `json:"github_repo_id"`
+	GithubFullName  string  `json:"github_full_name"`
+	Name            string  `json:"name"`
+	Description     *string `json:"description"`
+	DefaultBranch   string  `json:"default_branch"`
+	IsActive        bool    `json:"is_active"`
+	ForkFullName    *string `json:"fork_full_name"`
+	ForkStatus      string  `json:"fork_status"`
+	ForkSyncedAt    *string `json:"fork_synced_at"`
+	ForkWorkflowID  *string `json:"fork_workflow_id"`
+	TeamID          string  `json:"team_id"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 type RepositoryListResponse struct {
@@ -60,17 +63,24 @@ type ResyncResponse struct {
 }
 
 func NewRepositoryResponse(repo *model.Repository, teamID string) RepositoryResponse {
-	return RepositoryResponse{
+	resp := RepositoryResponse{
 		ID:             repo.ID.String(),
 		GithubRepoID:   repo.GithubRepoID,
 		GithubFullName: repo.GithubFullName,
 		Name:           repo.Name,
 		Description:    repo.Description,
 		DefaultBranch:  repo.DefaultBranch,
-		CloneStatus:    repo.CloneStatus,
 		IsActive:       repo.IsActive,
+		ForkFullName:   repo.ForkFullName,
+		ForkStatus:     repo.ForkStatus,
+		ForkWorkflowID: repo.ForkWorkflowID,
 		TeamID:         teamID,
 		CreatedAt:      repo.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:      repo.UpdatedAt.Format(time.RFC3339),
 	}
+	if repo.ForkSyncedAt != nil {
+		t := repo.ForkSyncedAt.Format(time.RFC3339)
+		resp.ForkSyncedAt = &t
+	}
+	return resp
 }

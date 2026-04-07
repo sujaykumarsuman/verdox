@@ -13,6 +13,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/sujaykumarsuman/verdox/backend/internal/config"
+	"encoding/json"
+
 	"github.com/sujaykumarsuman/verdox/backend/internal/dto"
 	"github.com/sujaykumarsuman/verdox/backend/internal/model"
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
@@ -46,6 +48,7 @@ type AuthService struct {
 	sessionRepo   repository.SessionRepository
 	resetRepo     repository.PasswordResetRepository
 	banReviewRepo repository.BanReviewRepository
+	notifService  *NotificationService
 	rdb           *redis.Client
 	cfg           *config.Config
 	log           zerolog.Logger
@@ -69,6 +72,12 @@ func NewAuthService(
 		cfg:           cfg,
 		log:           log,
 	}
+}
+
+// SetNotificationService sets the notification service for sending admin alerts.
+// Called after both services are initialized to avoid circular dependency.
+func (s *AuthService) SetNotificationService(ns *NotificationService) {
+	s.notifService = ns
 }
 
 func (s *AuthService) Signup(ctx context.Context, req *dto.SignupRequest) (*dto.AuthResponse, string, error) {
@@ -206,11 +215,12 @@ func (s *AuthService) ForgotPassword(ctx context.Context, req *dto.ForgotPasswor
 		return fmt.Errorf("create reset: %w", err)
 	}
 
-	// Log reset URL (email out of scope for v1)
+	// Log reset URL (no email service — password reset links are logged to stdout)
 	frontendURL := s.cfg.FrontendURL
+	resetURL := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, token)
 	s.log.Info().
 		Str("user_id", user.ID.String()).
-		Str("reset_url", fmt.Sprintf("%s/reset-password?token=%s", frontendURL, token)).
+		Str("reset_url", resetURL).
 		Msg("password reset token generated")
 
 	return nil
@@ -437,6 +447,24 @@ func (s *AuthService) RequestBanReview(ctx context.Context, req *dto.BanReviewRe
 		Str("user_id", user.ID.String()).
 		Str("review_id", review.ID.String()).
 		Msg("ban review request submitted")
+
+	// Notify all admins about the new ban review request
+	if s.notifService != nil {
+		actionType := "ban_review_decision"
+		actionPayloadBytes, _ := json.Marshal(map[string]string{
+			"review_id": review.ID.String(),
+			"user_id":   user.ID.String(),
+			"username":  user.Username,
+		})
+		actionPayload := json.RawMessage(actionPayloadBytes)
+		_ = s.notifService.CreateForAdmins(ctx, &model.Notification{
+			Type:          model.NotificationBanReview,
+			Subject:       fmt.Sprintf("Ban review request from %s", user.Username),
+			Body:          fmt.Sprintf("User %s has requested a review of their ban.\n\nBan reason: %s\n\nClarification: %s", user.Username, banReason, req.Clarification),
+			ActionType:    &actionType,
+			ActionPayload: &actionPayload,
+		})
+	}
 
 	return nil
 }

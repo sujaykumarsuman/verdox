@@ -49,6 +49,7 @@ export function LoginForm() {
               reviewsRemaining: (err.details?.reviews_remaining as number) ?? 0,
               login,
               password,
+              email: login, // login could be email or username
             }));
           } catch {}
           router.push("/banned");

@@ -47,11 +47,13 @@ func Auth(jwtSecret string, userRepo repository.UserRepository, rdb *redis.Clien
 			// Validate JWT
 			claims, err := jwt.ValidateAccessToken(jwtSecret, tokenStr)
 			if err != nil {
+				clearAuthCookies(c)
 				return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or expired token")
 			}
 
 			userID, err := uuid.Parse(claims.Subject)
 			if err != nil {
+				clearAuthCookies(c)
 				return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid token claims")
 			}
 
@@ -65,6 +67,7 @@ func Auth(jwtSecret string, userRepo repository.UserRepository, rdb *redis.Clien
 			if exists == 0 {
 				// Fallback: check DB
 				if _, err := userRepo.GetByID(ctx, userID); err != nil {
+					clearAuthCookies(c)
 					return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "Session not found")
 				}
 			}
@@ -72,6 +75,7 @@ func Auth(jwtSecret string, userRepo repository.UserRepository, rdb *redis.Clien
 			// Check if user account is banned or deactivated
 			user, err := userRepo.GetByID(ctx, userID)
 			if err != nil {
+				clearAuthCookies(c)
 				return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not found")
 			}
 			if user.IsBanned {

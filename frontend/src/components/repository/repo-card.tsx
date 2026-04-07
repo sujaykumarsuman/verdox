@@ -4,14 +4,13 @@ import Link from "next/link";
 import { GitBranch, Clock } from "lucide-react";
 import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import type { Repository, CloneStatus } from "@/types/repository";
+import type { Repository, ForkStatus } from "@/types/repository";
 
-const statusConfig: Record<CloneStatus, { color: string; label: string; pulse?: boolean }> = {
-  ready: { color: "bg-green-500", label: "Ready" },
-  pending: { color: "bg-yellow-500", label: "Pending", pulse: true },
-  cloning: { color: "bg-yellow-500", label: "Cloning", pulse: true },
-  failed: { color: "bg-red-500", label: "Failed" },
-  evicted: { color: "bg-gray-400", label: "Evicted" },
+const statusConfig: Record<ForkStatus, { color: string; label: string; pulse?: boolean }> = {
+  ready: { color: "bg-green-500", label: "Fork Ready" },
+  none: { color: "bg-gray-400", label: "No Fork" },
+  forking: { color: "bg-yellow-500", label: "Forking", pulse: true },
+  failed: { color: "bg-red-500", label: "Fork Failed" },
 };
 
 interface RepoCardProps {
@@ -19,7 +18,7 @@ interface RepoCardProps {
 }
 
 export function RepoCard({ repo }: RepoCardProps) {
-  const status = statusConfig[repo.clone_status];
+  const status = statusConfig[repo.fork_status];
 
   return (
     <Link href={`/repositories/${repo.id}`}>

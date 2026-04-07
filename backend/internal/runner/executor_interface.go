@@ -8,8 +8,7 @@ import (
 
 // ExecutionMode constants.
 const (
-	ModeContainer = "container"
-	ModeGHA       = "gha"
+	ModeForkGHA = "fork_gha"
 )
 
 // ExecutionJob carries all data needed by an executor to run a test.
@@ -18,7 +17,7 @@ type ExecutionJob struct {
 	SuiteID            uuid.UUID
 	RepoID             uuid.UUID
 	RepositoryFullName string
-	LocalPath          string
+	LocalPath          string // deprecated: kept for struct compat, unused in fork mode
 	DefaultBranch      string
 	Branch             string
 	CommitHash         string

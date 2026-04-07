@@ -58,6 +58,18 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid email/username or password")
 		}
+		if errors.Is(err, service.ErrAccountBanned) {
+			// Fetch ban details to include in the error response
+			info, _ := h.authService.GetBannedUserInfo(c.Request().Context(), req.Login)
+			if info != nil {
+				return response.ErrorWithData(c, http.StatusForbidden, "ACCOUNT_BANNED",
+					"Your account has been banned. Please contact an administrator for review.", info)
+			}
+			return response.Error(c, http.StatusForbidden, "ACCOUNT_BANNED", "Your account has been banned. Please contact an administrator for review.")
+		}
+		if errors.Is(err, service.ErrAccountDeactivated) {
+			return response.Error(c, http.StatusForbidden, "ACCOUNT_DEACTIVATED", "Your account has been deactivated. Please contact an administrator.")
+		}
 		return response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to login")
 	}
 
@@ -69,12 +81,15 @@ func (h *AuthHandler) Login(c echo.Context) error {
 func (h *AuthHandler) Refresh(c echo.Context) error {
 	cookie, err := c.Cookie("verdox_refresh")
 	if err != nil || cookie.Value == "" {
+		h.clearAccessCookie(c)
+		h.clearRefreshCookie(c)
 		return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "Missing refresh token")
 	}
 
 	resp, newRefreshToken, err := h.authService.Refresh(c.Request().Context(), cookie.Value)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRefreshToken) {
+			h.clearAccessCookie(c)
 			h.clearRefreshCookie(c)
 			return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or expired refresh token")
 		}
@@ -126,6 +141,34 @@ func (h *AuthHandler) ResetPassword(c echo.Context) error {
 
 	return response.Success(c, http.StatusOK, dto.MessageResponse{
 		Message: "Password has been reset successfully. Please log in with your new password.",
+	})
+}
+
+func (h *AuthHandler) RequestBanReview(c echo.Context) error {
+	var req dto.BanReviewRequest
+	if err := v.BindAndValidate(c, &req); err != nil {
+		return err
+	}
+
+	err := h.authService.RequestBanReview(c.Request().Context(), &req)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			return response.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials")
+		}
+		if errors.Is(err, service.ErrNotBanned) {
+			return response.Error(c, http.StatusBadRequest, "NOT_BANNED", "Account is not banned")
+		}
+		if errors.Is(err, service.ErrReviewAlreadyPending) {
+			return response.Error(c, http.StatusConflict, "REVIEW_PENDING", "A review request is already pending")
+		}
+		if errors.Is(err, service.ErrReviewLimitReached) {
+			return response.Error(c, http.StatusForbidden, "REVIEW_LIMIT_REACHED", "You have reached the maximum number of review attempts (3)")
+		}
+		return response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to submit review request")
+	}
+
+	return response.Success(c, http.StatusCreated, dto.MessageResponse{
+		Message: "Review request submitted. An administrator will review your case.",
 	})
 }
 

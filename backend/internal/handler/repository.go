@@ -153,22 +153,6 @@ func (h *RepositoryHandler) ListCommits(c echo.Context) error {
 	return response.Success(c, http.StatusOK, commits)
 }
 
-// RetryClone handles POST /v1/repositories/:id/retry-clone
-func (h *RepositoryHandler) RetryClone(c echo.Context) error {
-	repoID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return response.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid repository ID")
-	}
-
-	userID := mw.GetUserID(c)
-	resp, err := h.repoService.RetryClone(c.Request().Context(), userID, repoID)
-	if err != nil {
-		return h.mapError(c, err)
-	}
-
-	return response.Success(c, http.StatusOK, resp)
-}
-
 // Resync handles POST /v1/repositories/:id/resync
 func (h *RepositoryHandler) Resync(c echo.Context) error {
 	repoID, err := uuid.Parse(c.Param("id"))
@@ -194,13 +178,13 @@ func (h *RepositoryHandler) mapError(c echo.Context, err error) error {
 	case errors.Is(err, service.ErrRepoNotFound):
 		return response.Error(c, http.StatusNotFound, "REPO_NOT_FOUND", "GitHub repository not found")
 	case errors.Is(err, service.ErrNoRepoAccess):
-		return response.Error(c, http.StatusForbidden, "NO_ACCESS", "PAT does not have access to this repository")
+		return response.Error(c, http.StatusForbidden, "NO_ACCESS", "PAT does not have access to this repository. Grant the service account access, or add a team PAT with access to this repo.")
 	case errors.Is(err, service.ErrDuplicateRepo):
 		return response.Error(c, http.StatusConflict, "DUPLICATE", "Repository already added")
 	case errors.Is(err, service.ErrPATNotConfigured):
 		return response.Error(c, http.StatusUnprocessableEntity, "PAT_NOT_CONFIGURED", "Team does not have a GitHub PAT configured")
-	case errors.Is(err, service.ErrCloneNotReady):
-		return response.Error(c, http.StatusUnprocessableEntity, "CLONE_NOT_READY", "Repository clone is not ready")
+	case errors.Is(err, service.ErrForkNotReady):
+		return response.Error(c, http.StatusUnprocessableEntity, "FORK_NOT_READY", "Repository fork is not ready")
 	case errors.Is(err, service.ErrNotTeamMember):
 		return response.Error(c, http.StatusForbidden, "FORBIDDEN", "Not a member of this team")
 	case errors.Is(err, service.ErrNotTeamAdmin):

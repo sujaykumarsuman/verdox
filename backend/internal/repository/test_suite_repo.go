@@ -27,13 +27,13 @@ func NewTestSuiteRepository(db *sqlx.DB) TestSuiteRepository {
 }
 
 func (r *testSuiteRepo) Create(ctx context.Context, suite *model.TestSuite) error {
-	query := `INSERT INTO test_suites (repository_id, name, type, execution_mode, docker_image, test_command, gha_workflow_id, env_vars, config_path, timeout_seconds)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	query := `INSERT INTO test_suites (repository_id, name, type, execution_mode, docker_image, test_command, gha_workflow_id, env_vars, config_path, timeout_seconds, workflow_config)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, updated_at`
 	return r.db.QueryRowxContext(ctx, query,
 		suite.RepositoryID, suite.Name, suite.Type, suite.ExecutionMode,
 		suite.DockerImage, suite.TestCommand, suite.GHAWorkflowID, suite.EnvVars,
-		suite.ConfigPath, suite.TimeoutSeconds,
+		suite.ConfigPath, suite.TimeoutSeconds, suite.WorkflowConfig,
 	).Scan(&suite.ID, &suite.CreatedAt, &suite.UpdatedAt)
 }
 

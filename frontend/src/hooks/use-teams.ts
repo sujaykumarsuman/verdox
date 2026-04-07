@@ -98,6 +98,11 @@ export function useJoinRequests(teamId: string, status?: string) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchRequests = useCallback(async () => {
+    if (!teamId) {
+      setRequests([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
