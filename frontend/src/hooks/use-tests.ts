@@ -8,7 +8,8 @@ import type {
   TestRunDetail,
   TestRunListResponse,
   RunLogsResponse,
-  DiscoveryResponse,
+  ListWorkflowFilesResponse,
+  ImportSuiteResponse,
 } from "@/types/test";
 import type { PaginationMeta } from "@/types/repository";
 
@@ -71,6 +72,7 @@ export async function updateTestSuite(
     type: string;
     config_path: string;
     timeout_seconds: number;
+    workflow_yaml: string;
   }>
 ): Promise<TestSuite> {
   return api<TestSuite>(`/v1/suites/${suiteId}`, {
@@ -273,6 +275,12 @@ export async function cancelRun(
   return api(`/v1/runs/${runId}/cancel`, { method: "POST" });
 }
 
+export async function rerunRun(
+  runId: string
+): Promise<TestRun> {
+  return api<TestRun>(`/v1/runs/${runId}/rerun`, { method: "POST" });
+}
+
 export async function runAllSuites(
   repoId: string,
   branch: string,
@@ -284,36 +292,25 @@ export async function runAllSuites(
   });
 }
 
-// --- Discovery ---
+// --- Import Suite ---
 
-export async function discoverTests(
+export async function listWorkflowFiles(
   repoId: string
-): Promise<DiscoveryResponse> {
-  return api<DiscoveryResponse>(`/v1/repositories/${repoId}/discover`, {
-    method: "POST",
-  });
+): Promise<ListWorkflowFilesResponse> {
+  return api<ListWorkflowFilesResponse>(
+    `/v1/repositories/${repoId}/workflows`
+  );
 }
 
-export function useDiscovery(repoId: string) {
-  const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const scan = useCallback(async () => {
-    if (!repoId) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await discoverTests(repoId);
-      setDiscovery(data);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Discovery failed"
-      );
-    } finally {
-      setIsLoading(false);
+export async function importSuite(
+  repoId: string,
+  data: { workflow_file?: string; workflow_yaml?: string }
+): Promise<ImportSuiteResponse> {
+  return api<ImportSuiteResponse>(
+    `/v1/repositories/${repoId}/import-suite`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
     }
-  }, [repoId]);
-
-  return { discovery, isLoading, error, scan };
+  );
 }

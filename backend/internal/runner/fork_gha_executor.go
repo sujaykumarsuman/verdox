@@ -101,6 +101,42 @@ func (e *ForkGHAExecutor) Execute(ctx context.Context, job *ExecutionJob) (*Exec
 	return &ExecutionResult{Status: "dispatched"}, nil
 }
 
+// Rerun triggers a re-execution of a previously completed GHA workflow run.
+func (e *ForkGHAExecutor) Rerun(ctx context.Context, job *ExecutionJob, originalGHARunID int64) (*ExecutionResult, error) {
+	if !e.forkService.IsConfigured() {
+		return &ExecutionResult{Status: "failed", ErrorMsg: "Service account PAT not configured"}, nil
+	}
+
+	forkName := job.EnvVars["_fork_full_name"]
+	if forkName == "" {
+		return &ExecutionResult{Status: "failed", ErrorMsg: "Fork not set up for this repository"}, nil
+	}
+
+	// Call GitHub's rerun API
+	if err := e.forkService.RerunWorkflow(ctx, forkName, originalGHARunID); err != nil {
+		return &ExecutionResult{
+			Status:   "failed",
+			ErrorMsg: "GHA rerun failed: " + err.Error(),
+		}, nil
+	}
+
+	e.log.Info().
+		Str("run_id", job.RunID.String()).
+		Str("fork", forkName).
+		Int64("original_gha_run_id", originalGHARunID).
+		Msg("fork GHA workflow rerun triggered")
+
+	// Register with poller — use the fork name and commit hash
+	// The poller will find the new GHA run by head_sha
+	if e.registerPoller != nil {
+		pollerJob := *job
+		pollerJob.RepositoryFullName = forkName
+		e.registerPoller(job.RunID.String(), &pollerJob, e.cfg.ServiceAccountPAT)
+	}
+
+	return &ExecutionResult{Status: "dispatched"}, nil
+}
+
 func (e *ForkGHAExecutor) Cancel(ctx context.Context, runID string) error {
 	e.log.Warn().Str("run_id", runID).Msg("fork GHA run cancellation not yet implemented")
 	return nil

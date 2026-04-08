@@ -118,21 +118,23 @@ export interface WorkflowConfig {
   concurrency?: WorkflowConcurrency | null;
 }
 
-export interface DiscoverySuggestion {
+// --- Import Suite Types ---
+
+export interface WorkflowFile {
   name: string;
-  type: string;
-  execution_mode: ExecutionMode;
-  docker_image?: string;
-  test_command?: string;
-  gha_workflow?: string;
-  confidence: number;
-  reasoning: string;
+  path: string;
 }
 
-export interface DiscoveryResponse {
+export interface ListWorkflowFilesResponse {
   repository_id: string;
-  suggestions: DiscoverySuggestion[];
-  scanned_at: string;
+  files: WorkflowFile[];
+}
+
+export interface ImportSuiteResponse {
+  name: string;
+  type: string;
+  timeout_seconds: number;
+  workflow_yaml: string;
 }
 
 // --- Hierarchy Types (Phase 2) ---

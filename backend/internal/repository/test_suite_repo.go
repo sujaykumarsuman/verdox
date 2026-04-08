@@ -59,11 +59,11 @@ func (r *testSuiteRepo) ListByRepositoryID(ctx context.Context, repoID uuid.UUID
 
 func (r *testSuiteRepo) Update(ctx context.Context, suite *model.TestSuite) error {
 	query := `UPDATE test_suites SET name = $1, type = $2, execution_mode = $3, docker_image = $4, test_command = $5,
-		gha_workflow_id = $6, env_vars = $7, config_path = $8, timeout_seconds = $9, updated_at = now()
-		WHERE id = $10`
+		gha_workflow_id = $6, env_vars = $7, config_path = $8, timeout_seconds = $9, workflow_yaml = $10, updated_at = now()
+		WHERE id = $11`
 	_, err := r.db.ExecContext(ctx, query,
 		suite.Name, suite.Type, suite.ExecutionMode, suite.DockerImage, suite.TestCommand,
-		suite.GHAWorkflowID, suite.EnvVars, suite.ConfigPath, suite.TimeoutSeconds, suite.ID)
+		suite.GHAWorkflowID, suite.EnvVars, suite.ConfigPath, suite.TimeoutSeconds, suite.WorkflowYAML, suite.ID)
 	return err
 }
 

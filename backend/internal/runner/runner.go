@@ -169,12 +169,24 @@ func (wp *WorkerPool) executeJob(ctx context.Context, workerID string, job *mode
 
 	// Update run status to running and dispatch
 	runRepo.UpdateStarted(ctx, runID)
-	result, err := executor.Execute(ctx, execJob)
-	if err != nil || result.Status == "failed" {
+
+	var result *ExecutionResult
+	if job.IsRerun && job.OriginalGHARunID > 0 {
+		// Rerun: call GitHub's rerun API instead of dispatching a new workflow
+		if forkExec, ok := executor.(*ForkGHAExecutor); ok {
+			result, err = forkExec.Rerun(ctx, execJob, job.OriginalGHARunID)
+		} else {
+			err = fmt.Errorf("rerun not supported for this executor")
+		}
+	} else {
+		result, err = executor.Execute(ctx, execJob)
+	}
+
+	if err != nil || (result != nil && result.Status == "failed") {
 		errMsg := "Fork GHA dispatch failed"
 		if err != nil {
 			errMsg = err.Error()
-		} else if result.ErrorMsg != "" {
+		} else if result != nil && result.ErrorMsg != "" {
 			errMsg = result.ErrorMsg
 		}
 		runRepo.UpdateFinished(ctx, runID, model.TestRunStatusFailed)

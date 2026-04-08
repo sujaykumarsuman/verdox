@@ -119,6 +119,22 @@ func (h *TestRunHandler) Cancel(c echo.Context) error {
 	return response.Success(c, http.StatusOK, resp)
 }
 
+// Rerun handles POST /v1/runs/:id/rerun
+func (h *TestRunHandler) Rerun(c echo.Context) error {
+	runID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid run ID")
+	}
+
+	userID := mw.GetUserID(c)
+	resp, err := h.runService.RerunRun(c.Request().Context(), userID, runID)
+	if err != nil {
+		return h.mapError(c, err)
+	}
+
+	return response.Success(c, http.StatusCreated, resp)
+}
+
 // RunAll handles POST /v1/repositories/:id/run-all
 func (h *TestRunHandler) RunAll(c echo.Context) error {
 	repoID, err := uuid.Parse(c.Param("id"))
@@ -152,6 +168,8 @@ func (h *TestRunHandler) mapError(c echo.Context, err error) error {
 		return response.Error(c, http.StatusConflict, "CONFLICT", "A run for this commit is already queued or running")
 	case errors.Is(err, service.ErrRunNotCancellable):
 		return response.Error(c, http.StatusConflict, "CONFLICT", "Run is already in a terminal state")
+	case errors.Is(err, service.ErrRunNotRerunnable):
+		return response.Error(c, http.StatusConflict, "CONFLICT", "Run is not in a failed state or has no GHA run ID")
 	case errors.Is(err, service.ErrForkNotReady):
 		return response.Error(c, http.StatusUnprocessableEntity, "FORK_NOT_READY", "Repository fork is not ready")
 	case errors.Is(err, service.ErrNotTeamMember):

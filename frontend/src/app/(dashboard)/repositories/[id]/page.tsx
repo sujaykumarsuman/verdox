@@ -18,17 +18,18 @@ import {
   GitBranch,
   GitFork,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRepository, useBranches, useCommits, resyncRepository, deleteRepository } from "@/hooks/use-repos";
 import { api } from "@/lib/api";
-import { useTestSuites, useLatestRuns, triggerRun, useDiscovery } from "@/hooks/use-tests";
+import { useTestSuites, useLatestRuns, triggerRun } from "@/hooks/use-tests";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BranchSelector } from "@/components/repository/branch-selector";
 import { SuiteCard } from "@/components/test/suite-card";
-import { DiscoveryPanel } from "@/components/test/discovery-panel";
+import { ImportSuiteDialog } from "@/components/test/import-suite-dialog";
 import { cn } from "@/lib/utils";
 
 export default function RepositoryDetailPage({
@@ -47,8 +48,7 @@ export default function RepositoryDetailPage({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [runningAll, setRunningAll] = useState(false);
   const { suites, isLoading: suitesLoading, refetch: refetchSuites } = useTestSuites(id);
-  const { discovery, isLoading: discovering, scan: scanForTests } = useDiscovery(id);
-  const [showDiscovery, setShowDiscovery] = useState(true);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [forkingRepo, setForkingRepo] = useState(false);
 
   // Compute active branch early — needed by hooks below
@@ -279,10 +279,10 @@ export default function RepositoryDetailPage({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={scanForTests}
-                loading={discovering}
+                onClick={() => setShowImportDialog(true)}
               >
-                Scan for Tests
+                <Sparkles className="h-3.5 w-3.5" />
+                Generate Suite
               </Button>
             )}
             {suites.length > 0 && isForkReady && latestCommit && (() => {
@@ -344,17 +344,6 @@ export default function RepositoryDetailPage({
           </div>
         </div>
 
-        {/* AI Discovery results */}
-        {discovery && showDiscovery && discovery.suggestions.length > 0 && (
-          <DiscoveryPanel
-            suggestions={discovery.suggestions}
-            onApply={() => {
-              router.push(`/repositories/${id}/suites/new`);
-            }}
-            onDismiss={() => setShowDiscovery(false)}
-          />
-        )}
-
         {suitesLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[1, 2].map((n) => (
@@ -400,6 +389,11 @@ export default function RepositoryDetailPage({
         )}
       </div>
 
+      <ImportSuiteDialog
+        repoId={id}
+        open={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+      />
     </div>
   );
 }

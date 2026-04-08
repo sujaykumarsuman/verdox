@@ -18,4 +18,6 @@ type JobPayload struct {
 	ConfigPath         string            `json:"config_path"`
 	TimeoutSeconds     int               `json:"timeout_seconds"`
 	EnvVars            map[string]string `json:"env_vars"`
+	IsRerun            bool              `json:"is_rerun,omitempty"`
+	OriginalGHARunID   int64             `json:"original_gha_run_id,omitempty"`
 }
