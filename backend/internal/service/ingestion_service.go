@@ -123,7 +123,11 @@ func (s *IngestionService) IngestForRun(ctx context.Context, runID uuid.UUID, pa
 	var perGroup []groupCases
 	sortOrder := 0
 
+	// Track how many groups each job contributes (for parallel duration calc)
+	var jobGroupCounts []int
+
 	for _, job := range payload.Jobs {
+		jobCount := 0
 		for _, pt := range job.Tests {
 			group, cases := s.buildGroupAndCases(runID, pt, sortOrder)
 			// Prefix group_id with job_id to avoid collisions when multiple jobs
@@ -132,7 +136,9 @@ func (s *IngestionService) IngestForRun(ctx context.Context, runID uuid.UUID, pa
 			groups = append(groups, group)
 			perGroup = append(perGroup, groupCases{cases: cases})
 			sortOrder++
+			jobCount++
 		}
+		jobGroupCounts = append(jobGroupCounts, jobCount)
 	}
 
 	// Batch create groups (populates group IDs)
@@ -154,8 +160,8 @@ func (s *IngestionService) IngestForRun(ctx context.Context, runID uuid.UUID, pa
 		return fmt.Errorf("batch create cases: %w", err)
 	}
 
-	// Compute and store summary
-	summary := computeRunSummary(groups, allCases)
+	// Compute and store summary (pass job structure for parallel duration)
+	summary := computeRunSummary(groups, allCases, jobGroupCounts)
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {
 		return fmt.Errorf("marshal summary: %w", err)
@@ -257,8 +263,8 @@ func (s *IngestionService) ingestJobResults(ctx context.Context, runID uuid.UUID
 		return fmt.Errorf("batch create cases: %w", err)
 	}
 
-	// Compute run summary and update
-	summary := computeRunSummary(groups, allCases)
+	// Compute run summary (single job — all groups are sequential)
+	summary := computeRunSummary(groups, allCases, nil)
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {
 		return fmt.Errorf("marshal summary: %w", err)
@@ -347,9 +353,12 @@ func (s *IngestionService) buildGroupAndCases(runID uuid.UUID, pt dto.PayloadTes
 	return group, cases
 }
 
-func computeRunSummary(groups []model.TestGroup, cases []model.TestCase) dto.RunSummaryV2 {
+// computeRunSummary computes aggregate stats for a run.
+// jobGroupCounts maps the number of groups per job (in order) so we can
+// compute wall-clock duration as max(per-job sum) instead of sum(all groups).
+// Jobs run in parallel on GHA, so summing would overcount.
+func computeRunSummary(groups []model.TestGroup, cases []model.TestCase, jobGroupCounts []int) dto.RunSummaryV2 {
 	var totalCases, passed, failed, skipped int
-	var totalDurationMs int64
 
 	for _, c := range cases {
 		totalCases++
@@ -363,10 +372,27 @@ func computeRunSummary(groups []model.TestGroup, cases []model.TestCase) dto.Run
 		}
 	}
 
-	// Use group durations (package-level) which are more accurate than sum of individual test durations
-	for _, g := range groups {
-		if g.DurationMs != nil {
-			totalDurationMs += int64(*g.DurationMs)
+	// Compute per-job duration sums, then take the max (parallel jobs).
+	var maxJobDurationMs int64
+	gi := 0
+	for _, count := range jobGroupCounts {
+		var jobDuration int64
+		for j := 0; j < count && gi < len(groups); j++ {
+			if groups[gi].DurationMs != nil {
+				jobDuration += int64(*groups[gi].DurationMs)
+			}
+			gi++
+		}
+		if jobDuration > maxJobDurationMs {
+			maxJobDurationMs = jobDuration
+		}
+	}
+	// Fallback: if no job structure provided, sum all (single-job case)
+	if len(jobGroupCounts) == 0 {
+		for _, g := range groups {
+			if g.DurationMs != nil {
+				maxJobDurationMs += int64(*g.DurationMs)
+			}
 		}
 	}
 
@@ -381,7 +407,7 @@ func computeRunSummary(groups []model.TestGroup, cases []model.TestCase) dto.Run
 		Passed:      passed,
 		Failed:      failed,
 		Skipped:     skipped,
-		DurationMs:  totalDurationMs,
+		DurationMs:  maxJobDurationMs,
 		PassRate:    passRate,
 	}
 }
