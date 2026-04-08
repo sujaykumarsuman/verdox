@@ -248,6 +248,9 @@ Here is a quick reference of all available Makefile targets.
 | `make migrate-down` | Rollback the last migration |
 | `make migrate-create NAME=xxx` | Create a new migration file |
 | `make seed` | Seed the database (root user is auto-created from .env on first startup) |
+| `make snapshot TAG=xxx` | Create a dev database snapshot |
+| `make snapshot-restore TAG=xxx` | Restore a dev database snapshot |
+| `make snapshot-list` | List available snapshots |
 | `make test` | Run all tests |
 | `make lint` | Run linters |
 | `make clean` | Remove build artifacts and volumes |

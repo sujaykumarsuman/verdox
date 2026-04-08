@@ -40,7 +40,7 @@ log in, see a dashboard shell, and hit health endpoints.
 |---|------|----------------|-------|
 | 1 | Write `docker-compose.yml` | `docker-compose.yml` | 5 services: `verdox-nginx` (:80/:443), `verdox-frontend` (:3000), `verdox-backend` (:8080), `verdox-postgres` (:5432), `verdox-redis` (:6379). Internal network `verdox-network`. Healthchecks on postgres and redis. |
 | 2 | Write `docker-compose.dev.yml` | `docker-compose.dev.yml` | Volume mounts for hot reload (backend source, frontend source). Expose debug ports (5432, 6379). Use `air` for Go hot reload. |
-| 3 | Write backend Dockerfile | `docker/backend.Dockerfile` | Multi-stage: `golang:1.25-alpine` (builder) -> `alpine:3.21` (runtime). CGO_ENABLED=0. Non-root user. ~15 MB final image. |
+| 3 | Write backend Dockerfile | `docker/backend.Dockerfile` | Multi-stage: `golang:1.26-alpine` (builder) -> `alpine:3.21` (runtime). CGO_ENABLED=0. Non-root user. ~15 MB final image. |
 | 4 | Write frontend Dockerfile | `docker/frontend.Dockerfile` | Multi-stage: `node:22-alpine` (deps) -> `node:22-alpine` (builder, `next build`) -> `node:22-alpine` (runtime, standalone output). Non-root user. |
 | 5 | ~~Write runner Dockerfile~~ | N/A | Removed. Test execution uses fork-based GitHub Actions (no runner container needed). |
 | 6 | Write Nginx config | `nginx/nginx.conf`, `nginx/conf.d/default.conf` | Proxy rules: `/api/*` -> backend:8080 (strip `/api` prefix), `/webhooks/*` -> backend:8080 (passthrough), `/*` -> frontend:3000. Worker processes, gzip, log format. |
@@ -130,7 +130,7 @@ log in, see a dashboard shell, and hit health endpoints.
 
 ### Phase 1 Confirmation Gate
 
-- [ ] `make dev` starts all 6 services without errors
+- [ ] `make dev` starts all 5 services without errors
 - [ ] `make migrate-up` applies all 10 migrations successfully
 - [ ] Root user bootstrap creates root user from `ROOT_EMAIL`/`ROOT_PASSWORD` env vars on first boot
 - [ ] `GET /health` returns 200
@@ -173,11 +173,11 @@ for their team, add repos by URL, and browse cloned repositories.
 
 | # | Task | Deliverable(s) | Notes |
 |---|------|----------------|-------|
-| 1 | Repository model | `internal/model/repository.go` | Fields: id, github_full_name, name, description, default_branch, clone_path, clone_status (pending/cloning/ready/failed), is_active, created_at, updated_at. |
+| 1 | Repository model | `internal/model/repository.go` | Fields: id, github_full_name, name, description, default_branch, is_active, fork_full_name, fork_status, fork_synced_at, fork_workflow_id, fork_head_sha, created_at, updated_at. |
 | 2 | Repository DTOs | `internal/dto/repository_dto.go` | AddRepoRequest (github_url), UpdateRepoRequest, RepoResponse, RepoListResponse, BranchResponse, CommitResponse. |
 | 3 | Repository repository | `internal/repository/repository_repo.go` | Create, GetByID, GetByGitHubFullName, ListByTeam (paginated, sorted), Update, SoftDelete (set is_active=false). |
 | 4 | Repository service | `internal/service/repository_service.go` | AddRepo (parse URL, resolve team PAT, fetch metadata via PAT, insert, enqueue clone job), GetDetail, List, Deactivate, GetBranches (from local clone via `git branch -r`), GetCommits (from local clone via `git log`). |
-| 5 | Clone worker job | `internal/queue/repo_clone.go` | `repo.clone` job type. Worker clones repo to `VERDOX_REPO_BASE_PATH/<owner>/<repo>` using the team's PAT. Updates clone_status on success/failure. |
+| 5 | ~~Clone worker job~~ | N/A | Removed. Repos are accessed via GitHub API on forks, not cloned locally. |
 | 6 | Repository handlers | `internal/handler/repository.go` | `POST /api/v1/repositories` (add by URL), `GET /api/v1/repositories` (list), `GET /api/v1/repositories/:id` (detail), `PUT /api/v1/repositories/:id` (update), `DELETE /api/v1/repositories/:id` (soft delete), `GET /api/v1/repositories/:id/branches`, `GET /api/v1/repositories/:id/commits`. All require auth middleware. |
 | 7 | TypeScript types | `src/types/repository.ts` | Repository, Branch, Commit types. |
 

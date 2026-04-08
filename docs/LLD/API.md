@@ -604,6 +604,83 @@ Path Parameters:
 
 ---
 
+### GET /api/v1/repositories/:id/workflows
+
+**Description:** List GitHub Actions workflow files from the fork repository.
+
+**Auth:** Authenticated
+
+**Response 200:**
+
+```json
+{
+  "data": {
+    "repository_id": "661f1a2b-...",
+    "files": [
+      { "name": "ci.yml", "path": ".github/workflows/ci.yml" },
+      { "name": "tests.yml", "path": ".github/workflows/tests.yml" }
+    ]
+  }
+}
+```
+
+---
+
+### POST /api/v1/repositories/:id/generate-suite
+
+**Description:** Generate a Verdox-compatible test suite from an existing GitHub Actions workflow using AI. Accepts either a workflow file path (fetched from the fork) or raw YAML. Returns pre-fill data for the suite creation form.
+
+**Auth:** Authenticated
+
+**Request:**
+
+```json
+{
+  "workflow_file": ".github/workflows/ci.yml",
+  "model": "gpt-4o",
+  "timeout_seconds": 300
+}
+```
+
+Or with pasted YAML:
+
+```json
+{
+  "workflow_yaml": "name: CI\non: push\njobs: ...",
+  "model": "gpt-4o",
+  "timeout_seconds": 300
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `workflow_file` | string | One of | Path to workflow file in the fork |
+| `workflow_yaml` | string | One of | Raw workflow YAML content |
+| `model` | string | No | AI model (default: `gpt-4o`). Options: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-5.4-mini`, `gpt-5.4`, `o3-mini` |
+| `timeout_seconds` | int | No | AI call timeout (default: 300, max: 600) |
+
+**Response 200:**
+
+```json
+{
+  "data": {
+    "name": "go-tests",
+    "type": "unit",
+    "timeout_seconds": 3600,
+    "workflow_yaml": "name: verdox: go-tests\non:\n  workflow_dispatch: ..."
+  }
+}
+```
+
+**Errors:**
+
+| Status | Code | When |
+|--------|------|------|
+| 400 | `INVALID_REQUEST` | Neither or both of workflow_file/workflow_yaml provided |
+| 500 | `GENERATE_FAILED` | AI call failed or timed out |
+
+---
+
 ### GET /api/v1/repositories/:id
 
 **Description:** Get detailed information for a single repository, including its test suites and recent test runs.
@@ -2803,6 +2880,8 @@ Body:
 | GET    | `/api/v1/repositories`                     | Authenticated    | 30/min       | List accessible repositories         |
 | POST   | `/api/v1/repositories`                     | root/mod/team admin | 5/min      | Add repository by GitHub URL         |
 | POST   | `/api/v1/repositories/:id/resync`          | Authenticated    | 10/min       | Re-fetch from remote                 |
+| GET    | `/api/v1/repositories/:id/workflows`       | Authenticated    | 20/min       | List GHA workflow files from fork    |
+| POST   | `/api/v1/repositories/:id/generate-suite`  | Authenticated    | 5/min        | AI-generate suite from workflow      |
 | GET    | `/api/v1/repositories/:id`                 | Authenticated    | 30/min       | Repository detail with suites        |
 | DELETE | `/api/v1/repositories/:id`                 | Authenticated    | 10/min       | Deactivate repository (soft delete)  |
 | GET    | `/api/v1/repositories/:id/branches`        | Authenticated    | 20/min       | List branches (local clone, cached)  |

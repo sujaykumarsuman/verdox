@@ -37,7 +37,7 @@ Browser --> Nginx (reverse proxy)
 ## Features
 
 - **Repository Management** -- Add GitHub repos, browse branches/commits, fork management
-- **Test Suites** -- Create suites with custom workflow YAML, template system, AI-powered import from existing GHA workflows
+- **Test Suites** -- Create suites with custom workflow YAML, template system, AI-powered generation from existing GHA workflows (model selector, configurable timeout)
 - **Test Runs** -- Trigger runs per branch, real-time status via SSE, cancel/rerun support
 - **Hierarchical Results** -- 3-level test result model: runs > groups (jobs) > cases
 - **Teams** -- Create teams, invite members (admin/maintainer/viewer roles), assign repos, join requests
@@ -105,6 +105,9 @@ make migrate-up       # Apply pending migrations
 make migrate-down     # Rollback last migration
 make migrate-create NAME=xyz  # Create new migration pair
 make seed             # Bootstrap root user
+make snapshot TAG=x   # Create dev database snapshot
+make snapshot-restore TAG=x  # Restore a snapshot
+make snapshot-list    # List available snapshots
 make test             # Run all tests
 make lint             # Run linters
 ```
