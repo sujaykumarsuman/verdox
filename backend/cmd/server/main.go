@@ -135,9 +135,9 @@ func main() {
 	// Hierarchy routes (authenticated read endpoints for groups/cases)
 	registerHierarchyRoutes(e, db, rdb, cfg, log)
 
-	// Import routes (if OpenAI API key configured)
+	// Generate suite routes (if OpenAI API key configured)
 	if cfg.OpenAIAPIKey != "" {
-		registerImportRoutes(e, db, rdb, cfg, log)
+		registerGenerateSuiteRoutes(e, db, rdb, cfg, log)
 	}
 
 	// Worker pool

@@ -29,7 +29,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BranchSelector } from "@/components/repository/branch-selector";
 import { SuiteCard } from "@/components/test/suite-card";
-import { ImportSuiteDialog } from "@/components/test/import-suite-dialog";
+import { GenerateSuitePanel } from "@/components/test/generate-suite-panel";
 import { cn } from "@/lib/utils";
 
 export default function RepositoryDetailPage({
@@ -389,7 +389,7 @@ export default function RepositoryDetailPage({
         )}
       </div>
 
-      <ImportSuiteDialog
+      <GenerateSuitePanel
         repoId={id}
         open={showImportDialog}
         onClose={() => setShowImportDialog(false)}

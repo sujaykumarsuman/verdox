@@ -22,28 +22,28 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/internal/repository"
 )
 
-type ImportService struct {
+type GenerateSuiteService struct {
 	repoRepo repository.RepositoryRepository
 	cfg      *config.Config
 	client   *http.Client
 	log      zerolog.Logger
 }
 
-func NewImportService(
+func NewGenerateSuiteService(
 	repoRepo repository.RepositoryRepository,
 	cfg *config.Config,
 	log zerolog.Logger,
-) *ImportService {
-	return &ImportService{
+) *GenerateSuiteService {
+	return &GenerateSuiteService{
 		repoRepo: repoRepo,
 		cfg:      cfg,
-		client:   &http.Client{Timeout: 180 * time.Second},
+		client:   &http.Client{Timeout: 600 * time.Second},
 		log:      log,
 	}
 }
 
 // ListWorkflowFiles lists GHA workflow files from the upstream repo via GitHub Contents API.
-func (s *ImportService) ListWorkflowFiles(ctx context.Context, repoID uuid.UUID) (*dto.ListWorkflowFilesResponse, error) {
+func (s *GenerateSuiteService) ListWorkflowFiles(ctx context.Context, repoID uuid.UUID) (*dto.ListWorkflowFilesResponse, error) {
 	pat := s.cfg.ServiceAccountPAT
 	if pat == "" {
 		return nil, fmt.Errorf("service account PAT not configured")
@@ -115,8 +115,8 @@ func (s *ImportService) ListWorkflowFiles(ctx context.Context, repoID uuid.UUID)
 	}, nil
 }
 
-// ImportSuite converts an existing GHA workflow into a Verdox-compatible workflow using GPT.
-func (s *ImportService) ImportSuite(ctx context.Context, repoID uuid.UUID, req *dto.ImportSuiteRequest) (*dto.ImportSuiteResponse, error) {
+// GenerateSuite converts an existing GHA workflow into a Verdox-compatible workflow using GPT.
+func (s *GenerateSuiteService) GenerateSuite(ctx context.Context, repoID uuid.UUID, req *dto.GenerateSuiteRequest) (*dto.GenerateSuiteResponse, error) {
 	if s.cfg.OpenAIAPIKey == "" {
 		return nil, fmt.Errorf("AI import is not configured (VERDOX_OPENAI_API_KEY not set)")
 	}
@@ -150,9 +150,19 @@ func (s *ImportService) ImportSuite(ctx context.Context, repoID uuid.UUID, req *
 		s.log.Warn().Err(err).Msg("failed to load full AI context, proceeding with partial context")
 	}
 
+	// Resolve model and timeout
+	model := req.Model
+	if model == "" {
+		model = "gpt-4o"
+	}
+	timeout := time.Duration(req.TimeoutSeconds) * time.Second
+	if timeout <= 0 || timeout > 600*time.Second {
+		timeout = 300 * time.Second
+	}
+
 	// Build prompt and call OpenAI
-	prompt := s.buildImportPrompt(repo.GithubFullName, sourceYAML, schema, example)
-	resp, err := s.callOpenAI(ctx, prompt)
+	prompt := s.buildGeneratePrompt(repo.GithubFullName, sourceYAML, schema, example)
+	resp, err := s.callOpenAI(ctx, prompt, model, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("AI analysis failed: %w", err)
 	}
@@ -161,7 +171,7 @@ func (s *ImportService) ImportSuite(ctx context.Context, repoID uuid.UUID, req *
 }
 
 // fetchFileFromGitHub reads a file's content from the upstream repo via GitHub Contents API.
-func (s *ImportService) fetchFileFromGitHub(ctx context.Context, repoFullName, filePath string) (string, error) {
+func (s *GenerateSuiteService) fetchFileFromGitHub(ctx context.Context, repoFullName, filePath string) (string, error) {
 	pat := s.cfg.ServiceAccountPAT
 	if pat == "" {
 		return "", fmt.Errorf("service account PAT not configured")
@@ -215,13 +225,13 @@ func (s *ImportService) fetchFileFromGitHub(ctx context.Context, repoFullName, f
 }
 
 // detectGoVersion fetches go.mod from the repo and extracts the Go version directive.
-func (s *ImportService) setGitHubHeaders(req *http.Request, pat string) {
+func (s *GenerateSuiteService) setGitHubHeaders(req *http.Request, pat string) {
 	req.Header.Set("Authorization", "Bearer "+pat)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 }
 
-func (s *ImportService) loadAIContext() (schema, example string, err error) {
+func (s *GenerateSuiteService) loadAIContext() (schema, example string, err error) {
 	basePath := s.cfg.AIContextPath
 	if basePath == "" {
 		basePath = "./ai/res/docs"
@@ -246,7 +256,7 @@ func (s *ImportService) loadAIContext() (schema, example string, err error) {
 	return schema, example, nil
 }
 
-func (s *ImportService) buildImportPrompt(repoName, sourceYAML, schema, example string) string {
+func (s *GenerateSuiteService) buildGeneratePrompt(repoName, sourceYAML, schema, example string) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Repository: %s\n\n", repoName))
 	b.WriteString("=== SOURCE WORKFLOW ===\n")
@@ -268,7 +278,7 @@ func (s *ImportService) buildImportPrompt(repoName, sourceYAML, schema, example 
 	return b.String()
 }
 
-func (s *ImportService) callOpenAI(ctx context.Context, userPrompt string) (*dto.ImportSuiteResponse, error) {
+func (s *GenerateSuiteService) callOpenAI(ctx context.Context, userPrompt, model string, timeout time.Duration) (*dto.GenerateSuiteResponse, error) {
 	systemPrompt := `You convert GitHub Actions workflows into Verdox-compatible workflows.
 Verdox runs tests on forked repositories. The workflow runs on the FORK, not the upstream repo.
 
@@ -498,7 +508,7 @@ Respond with a JSON object containing exactly:
 ONLY valid JSON. No markdown fences.`
 
 	reqBody := map[string]interface{}{
-		"model": "gpt-5.4-mini",
+		"model": model,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -512,7 +522,11 @@ ONLY valid JSON. No markdown fences.`
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	// Per-request timeout (separate from the global HTTP client timeout)
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -548,10 +562,10 @@ ONLY valid JSON. No markdown fences.`
 	content := result.Choices[0].Message.Content
 
 	// Parse response — try direct object first, then wrapped
-	var importResp dto.ImportSuiteResponse
+	var importResp dto.GenerateSuiteResponse
 	if err := json.Unmarshal([]byte(content), &importResp); err != nil {
 		var wrapper struct {
-			Result dto.ImportSuiteResponse `json:"result"`
+			Result dto.GenerateSuiteResponse `json:"result"`
 		}
 		if err := json.Unmarshal([]byte(content), &wrapper); err != nil {
 			return nil, fmt.Errorf("failed to parse AI response: %w", err)

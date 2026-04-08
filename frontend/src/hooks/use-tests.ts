@@ -9,7 +9,7 @@ import type {
   TestRunListResponse,
   RunLogsResponse,
   ListWorkflowFilesResponse,
-  ImportSuiteResponse,
+  GenerateSuiteResponse,
 } from "@/types/test";
 import type { PaginationMeta } from "@/types/repository";
 
@@ -292,7 +292,7 @@ export async function runAllSuites(
   });
 }
 
-// --- Import Suite ---
+// --- Generate Suite ---
 
 export async function listWorkflowFiles(
   repoId: string
@@ -302,15 +302,22 @@ export async function listWorkflowFiles(
   );
 }
 
-export async function importSuite(
+export async function generateSuite(
   repoId: string,
-  data: { workflow_file?: string; workflow_yaml?: string }
-): Promise<ImportSuiteResponse> {
-  return api<ImportSuiteResponse>(
-    `/v1/repositories/${repoId}/import-suite`,
+  data: {
+    workflow_file?: string;
+    workflow_yaml?: string;
+    model?: string;
+    timeout_seconds?: number;
+  },
+  signal?: AbortSignal
+): Promise<GenerateSuiteResponse> {
+  return api<GenerateSuiteResponse>(
+    `/v1/repositories/${repoId}/generate-suite`,
     {
       method: "POST",
       body: JSON.stringify(data),
+      signal,
     }
   );
 }
