@@ -43,11 +43,11 @@ export default function CreateTestSuitePage({
   const [workflowYaml, setWorkflowYaml] = useState(defaultTemplate.yaml);
   const [submitting, setSubmitting] = useState(false);
 
-  // Pre-fill from import (sessionStorage bridge from ImportSuiteDialog)
+  // Pre-fill from generate (sessionStorage bridge from GenerateSuitePanel)
   useEffect(() => {
-    const stored = sessionStorage.getItem("verdox_import_suite");
+    const stored = sessionStorage.getItem("verdox_generated_suite");
     if (!stored) return;
-    sessionStorage.removeItem("verdox_import_suite");
+    sessionStorage.removeItem("verdox_generated_suite");
     try {
       const data = JSON.parse(stored) as {
         name?: string;

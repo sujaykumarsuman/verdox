@@ -11,22 +11,22 @@ import (
 	"github.com/sujaykumarsuman/verdox/backend/pkg/response"
 )
 
-type ImportHandler struct {
-	importService *service.ImportService
+type GenerateSuiteHandler struct {
+	genSuiteService *service.GenerateSuiteService
 }
 
-func NewImportHandler(importService *service.ImportService) *ImportHandler {
-	return &ImportHandler{importService: importService}
+func NewGenerateSuiteHandler(svc *service.GenerateSuiteService) *GenerateSuiteHandler {
+	return &GenerateSuiteHandler{genSuiteService: svc}
 }
 
 // ListWorkflows handles GET /v1/repositories/:id/workflows
-func (h *ImportHandler) ListWorkflows(c echo.Context) error {
+func (h *GenerateSuiteHandler) ListWorkflows(c echo.Context) error {
 	repoID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		return response.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid repository ID")
 	}
 
-	resp, err := h.importService.ListWorkflowFiles(c.Request().Context(), repoID)
+	resp, err := h.genSuiteService.ListWorkflowFiles(c.Request().Context(), repoID)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "LIST_WORKFLOWS_FAILED", err.Error())
 	}
@@ -34,14 +34,14 @@ func (h *ImportHandler) ListWorkflows(c echo.Context) error {
 	return response.Success(c, http.StatusOK, resp)
 }
 
-// ImportSuite handles POST /v1/repositories/:id/import-suite
-func (h *ImportHandler) ImportSuite(c echo.Context) error {
+// GenerateSuite handles POST /v1/repositories/:id/generate-suite
+func (h *GenerateSuiteHandler) GenerateSuite(c echo.Context) error {
 	repoID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		return response.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid repository ID")
 	}
 
-	var req dto.ImportSuiteRequest
+	var req dto.GenerateSuiteRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
@@ -53,9 +53,9 @@ func (h *ImportHandler) ImportSuite(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "INVALID_REQUEST", "Provide exactly one of workflow_file or workflow_yaml")
 	}
 
-	resp, err := h.importService.ImportSuite(c.Request().Context(), repoID, &req)
+	resp, err := h.genSuiteService.GenerateSuite(c.Request().Context(), repoID, &req)
 	if err != nil {
-		return response.Error(c, http.StatusInternalServerError, "IMPORT_FAILED", err.Error())
+		return response.Error(c, http.StatusInternalServerError, "GENERATE_FAILED", err.Error())
 	}
 
 	return response.Success(c, http.StatusOK, resp)

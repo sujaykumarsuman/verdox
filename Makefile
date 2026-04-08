@@ -1,5 +1,6 @@
 .PHONY: help dev dev-backend dev-frontend build build-backend build-frontend \
         up down logs migrate-up migrate-down migrate-create seed \
+        snapshot snapshot-restore snapshot-list \
         test test-backend test-frontend lint clean
 
 # Default target
@@ -90,6 +91,19 @@ migrate-create: ## Create a new migration pair (usage: make migrate-create NAME=
 
 seed: ## Bootstrap root user from ROOT_EMAIL and ROOT_PASSWORD env vars
 	cd backend && go run ./scripts/seed/main.go
+
+# ============================================================
+# Snapshots
+# ============================================================
+
+snapshot: ## Create a dev database snapshot (usage: make snapshot TAG=my-tag)
+	@./scripts/snapshot.sh create $(TAG)
+
+snapshot-restore: ## Restore a dev database snapshot (usage: make snapshot-restore TAG=my-tag)
+	@./scripts/snapshot.sh restore $(TAG)
+
+snapshot-list: ## List available snapshots
+	@./scripts/snapshot.sh list
 
 # ============================================================
 # Testing
