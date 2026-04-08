@@ -21,8 +21,6 @@ type Repository struct {
 	Name            string     `db:"name" json:"name"`
 	Description     *string    `db:"description" json:"description"`
 	DefaultBranch   string     `db:"default_branch" json:"default_branch"`
-	LocalPath       *string    `db:"local_path" json:"-"`
-	CloneStatus     string     `db:"clone_status" json:"-"`
 	IsActive        bool       `db:"is_active" json:"is_active"`
 	ForkFullName    *string    `db:"fork_full_name" json:"fork_full_name"`
 	ForkStatus      string     `db:"fork_status" json:"fork_status"`

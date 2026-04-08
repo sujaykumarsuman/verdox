@@ -6,7 +6,6 @@ type JobPayload struct {
 	TestSuiteID        string            `json:"test_suite_id"`
 	RepoID             string            `json:"repo_id"`
 	RepositoryFullName string            `json:"repository_full_name"`
-	LocalPath          string            `json:"local_path"`
 	DefaultBranch      string            `json:"default_branch"`
 	Branch             string            `json:"branch"`
 	CommitHash         string            `json:"commit_hash"`

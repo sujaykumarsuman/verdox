@@ -9,7 +9,7 @@
 # Variables
 # ────────────────────────────────────────
 COMPOSE         := docker compose
-COMPOSE_DEV     := $(COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml
+COMPOSE_DEV     := $(COMPOSE) --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml
 MIGRATE         := migrate
 MIGRATE_DB_URL  ?= postgres://verdox:verdoxpass@localhost:5432/verdox?sslmode=disable
 MIGRATION_DIR   := backend/migrations
@@ -65,7 +65,7 @@ up: ## Start the production stack (detached)
 	$(COMPOSE) up -d --build
 
 down: ## Stop and remove all containers and volumes
-	$(COMPOSE) down -v
+	$(COMPOSE) down -v --remove-orphans
 	@docker volume prune -f > /dev/null 2>&1 || true
 
 logs: ## Tail logs for all services (Ctrl+C to stop)

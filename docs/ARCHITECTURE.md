@@ -14,7 +14,7 @@ Docker Compose behind an Nginx reverse proxy.
 
 **Tech Stack:**
 
-- **Backend:** Go 1.25+ with Echo v4 HTTP framework
+- **Backend:** Go 1.26+ with Echo v4 HTTP framework
 - **Frontend:** Next.js 15 (App Router, React Server Components)
 - **Database:** PostgreSQL 17
 - **Cache / Queue:** Redis 7

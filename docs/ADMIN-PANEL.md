@@ -1,6 +1,6 @@
 # Verdox -- Admin Panel Design Document
 
-> Go 1.25+ | Echo v4 | Next.js 15 | PostgreSQL 17 | Redis 7
+> Go 1.26+ | Echo v4 | Next.js 15 | PostgreSQL 17 | Redis 7
 
 This document defines the admin panel for the Verdox platform. It covers access
 control, user management, system statistics, UI components, and the required

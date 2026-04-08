@@ -2,7 +2,7 @@
 
 This document describes the monitoring, logging, and observability strategy for Verdox. It covers structured logging, health checks, application metrics, Docker logging, alerting, and optional log aggregation.
 
-**Stack**: Go 1.25+ with Echo v4, zerolog for structured JSON logging. All services (nginx, frontend, backend, postgres, redis, runner) run in Docker Compose.
+**Stack**: Go 1.26+ with Echo v4, zerolog for structured JSON logging. All services (nginx, frontend, backend, postgres, redis) run in Docker Compose.
 
 ---
 

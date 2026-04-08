@@ -17,13 +17,11 @@ type ExecutionJob struct {
 	SuiteID            uuid.UUID
 	RepoID             uuid.UUID
 	RepositoryFullName string
-	LocalPath          string // deprecated: kept for struct compat, unused in fork mode
 	DefaultBranch      string
 	Branch             string
 	CommitHash         string
 	SuiteType          string
 	ExecutionMode      string
-	DockerImage        string
 	TestCommand        string
 	GHAWorkflowID     string
 	ConfigPath         string

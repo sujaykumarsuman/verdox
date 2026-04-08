@@ -8,7 +8,7 @@ This document is the canonical reference for how the Verdox codebase is organize
 
 ```
 verdox/
-├── backend/                  # Go API server (Echo v4, Go 1.25+)
+├── backend/                  # Go API server (Echo v4, Go 1.26+)
 ├── frontend/                 # Next.js 15 web app (App Router, TypeScript, Tailwind CSS)
 ├── docker/                   # Dockerfiles and Docker-specific configs
 ├── nginx/                    # Nginx reverse-proxy configuration
@@ -86,10 +86,12 @@ backend/
 │   │   ├── team_service.go   # Team CRUD, member management, repo assignment
 │   │   ├── admin_service.go  # User management, system statistics
 │   │   └── github_service.go # GitHub API integration (clone, webhook verification, PAT encrypt/decrypt/validate)
-│   ├── runner/               # Docker-in-Docker test execution engine
-│   │   ├── runner.go         # Main run loop: polls queue, dispatches jobs
-│   │   ├── executor.go       # Container lifecycle: create, start, wait, remove
-│   │   └── parser.go         # Test output parsing for Go, pytest, and Jest formats
+│   ├── runner/               # Fork-based GHA test execution engine
+│   │   ├── runner.go         # Worker pool: polls queue, dispatches jobs to executor
+│   │   ├── fork_gha_executor.go  # Fork management, workflow dispatch, GHA run tracking
+│   │   ├── gha_poller.go     # Polls GitHub Actions API for run completion, downloads artifacts
+│   │   ├── executor_interface.go # Executor plugin interface and ExecutionJob struct
+│   │   └── parser.go         # Test output parsing for flat result formats
 │   ├── queue/                # Job queue abstraction
 │   │   └── queue.go          # Redis-backed push/pop, retry, and dead-letter logic
 │   ├── analyzer/             # AI-powered test discovery
@@ -412,8 +414,7 @@ Next.js route groups (directories wrapped in parentheses) share a layout without
 ```
 docker/
 ├── backend.Dockerfile        # Multi-stage Go build: golang:1.25-alpine -> alpine:3.21
-├── frontend.Dockerfile       # Multi-stage Node build: node:22-alpine -> node:22-alpine
-└── runner.Dockerfile         # Docker-in-Docker test runner image
+└── frontend.Dockerfile       # Multi-stage Node build: node:22-alpine -> node:22-alpine
 
 nginx/
 ├── nginx.conf                # Global Nginx settings (worker_processes, log format)
@@ -437,10 +438,6 @@ nginx/
 | `deps` | `node:22-alpine` | Installs `node_modules` from `package-lock.json`. |
 | `builder` | `node:22-alpine` | Runs `next build` to produce the `.next` standalone output. |
 | `runtime` | `node:22-alpine` | Copies the standalone build and `public/` assets. Runs as a non-root user. |
-
-**`runner.Dockerfile`**
-
-Extends a Docker-in-Docker base image. Pre-installs language runtimes and test frameworks needed to execute user test suites inside isolated containers.
 
 ### Nginx Proxy Rules
 

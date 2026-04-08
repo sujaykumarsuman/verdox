@@ -1,1 +1,0 @@
-ALTER TABLE teams ADD COLUMN is_discoverable BOOLEAN NOT NULL DEFAULT true;

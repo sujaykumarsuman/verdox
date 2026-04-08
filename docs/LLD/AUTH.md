@@ -1,6 +1,6 @@
 # Verdox -- Authentication & Authorization (LLD)
 
-> Go 1.25+ | Echo v4 | bcrypt | golang-jwt/jwt/v5 | Redis 7
+> Go 1.26+ | Echo v4 | bcrypt | golang-jwt/jwt/v5 | Redis 7
 
 ---
 

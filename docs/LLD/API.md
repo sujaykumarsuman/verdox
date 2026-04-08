@@ -539,8 +539,11 @@ Body:
     "description": "Consul is a distributed service mesh",
     "default_branch": "main",
     "is_active": true,
-    "clone_status": "pending",
-    "local_path": null,
+    "fork_full_name": null,
+    "fork_status": "none",
+    "fork_synced_at": null,
+    "fork_workflow_id": null,
+    "fork_head_sha": null,
     "created_at": "2025-01-15T09:30:00Z",
     "updated_at": "2025-01-15T09:30:00Z"
   }
@@ -597,7 +600,7 @@ Path Parameters:
 |--------|--------------------|-------------------------------------------|
 | 401    | `UNAUTHORIZED`     | Missing or invalid access token           |
 | 404    | `NOT_FOUND`        | Repository not found or not accessible    |
-| 422    | `UNPROCESSABLE`    | Clone not ready (clone_status != 'cloned')|
+| 422    | `UNPROCESSABLE`    | Repository not in a valid state for resync|
 
 ---
 

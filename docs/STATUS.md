@@ -192,8 +192,8 @@
 
 ### Test Runner
 
-- [x] Implement container-based test runner (Docker-in-Docker)
-- [x] Mount local clone read-only into test container
+- [x] Implement fork-based GitHub Actions executor (replaces DinD)
+- [x] GHA poller and webhook ingestion for run status updates
 - [x] Build test output parser (JUnit XML, TAP, JSON)
 - [x] Stream test logs via WebSocket
 - [x] Implement test timeout and cancellation
@@ -217,15 +217,15 @@
 
 ### Runner Infrastructure
 
-- [x] Configure runner resource limits (CPU, memory, time)
+- [x] Configure runner timeout and cancellation via GitHub Actions API
 - [x] Implement runner health monitoring
-- [x] Add runner auto-scaling hooks
+- [x] Runner embedded in backend server process (no separate container)
 
 ### Gate Checklist
 
 - [x] Test suite can be created and configured
 - [x] Test run can be triggered manually (admin/maintainer only)
-- [x] Test runner mounts local clone read-only and executes tests in isolated container
+- [x] Test runner forks repo and dispatches GitHub Actions for isolated execution
 - [x] Run numbering assigns sequential run-1, run-2, etc.
 - [x] Commit-hash caching skips re-run on same commit
 - [x] Test results are parsed and stored

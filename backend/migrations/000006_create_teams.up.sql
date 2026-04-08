@@ -8,6 +8,7 @@ CREATE TABLE teams (
     github_pat_set_at        TIMESTAMPTZ,
     github_pat_set_by        UUID,
     github_pat_github_username VARCHAR(255),
+    is_discoverable          BOOLEAN      NOT NULL DEFAULT true,
     created_at               TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ  NOT NULL DEFAULT now(),
     deleted_at               TIMESTAMPTZ,

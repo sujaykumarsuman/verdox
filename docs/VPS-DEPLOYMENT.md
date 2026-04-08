@@ -23,9 +23,8 @@
 ### Notes
 
 - Root or sudo access is required for initial setup.
-- The runner service spawns Docker-in-Docker containers. Each concurrent test run
-  consumes up to 2 CPU cores and 2 GB RAM. Size accordingly if
-  `RUNNER_MAX_CONCURRENT` is increased beyond the default of 5.
+- Test execution runs on GitHub Actions (fork-based), not on the VPS. The
+  `RUNNER_MAX_CONCURRENT` setting controls concurrent workflow dispatches.
 - SSD storage is required -- spinning disks will bottleneck PostgreSQL I/O and
   Docker image layer operations.
 - Repository clones are stored locally on disk (`VERDOX_REPO_BASE_PATH`). Plan
@@ -375,7 +374,7 @@ cd /opt/verdox
 docker compose up -d --build
 ```
 
-This builds the frontend, backend, and runner images, then starts all six
+This builds the frontend and backend images, then starts all five
 services. First build takes 3-5 minutes depending on server specs.
 
 Monitor the build output:
@@ -410,7 +409,7 @@ curl -s https://verdox.example.com/api/v1/health
 # Check all containers are running
 docker compose ps
 
-# Expected: all 6 services show status "Up" or "Up (healthy)"
+# Expected: all 5 services show status "Up" or "Up (healthy)"
 ```
 
 ---
@@ -587,8 +586,7 @@ services:
 ```
 
 The `no-new-privileges` flag prevents processes inside the container from
-gaining additional privileges via setuid/setgid binaries. The runner service is
-exempt because it requires privileged mode for Docker-in-Docker.
+gaining additional privileges via setuid/setgid binaries.
 
 ### 9.5 Regular Docker Image Updates
 
@@ -767,7 +765,6 @@ docker compose logs -f
 
 # Single service
 docker compose logs -f backend
-docker compose logs -f runner
 
 # Last 100 lines
 docker compose logs --tail=100 backend
@@ -844,7 +841,6 @@ Add to crontab (runs every 5 minutes):
 ```bash
 # Check container logs for the failing service
 docker compose logs backend
-docker compose logs runner
 
 # Verify .env file is present and readable
 ls -la /opt/verdox/.env
@@ -917,19 +913,6 @@ free -h
 #     resources:
 #       limits:
 #         memory: 1G
-```
-
-### Runner Cannot Spawn Test Containers
-
-```bash
-# Verify Docker socket is accessible
-docker compose exec runner docker info
-
-# Check runner logs for permission errors
-docker compose logs runner
-
-# Verify the runner container is running in privileged mode
-docker inspect verdox-runner | grep -i privileged
 ```
 
 ---

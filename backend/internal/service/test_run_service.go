@@ -150,17 +150,11 @@ func (s *TestRunService) TriggerRun(ctx context.Context, userID, suiteID uuid.UU
 		envVars[k] = v
 	}
 
-	localPath := ""
-	if repo.LocalPath != nil {
-		localPath = *repo.LocalPath
-	}
-
 	payload := &model.JobPayload{
 		TestRunID:          run.ID.String(),
 		TestSuiteID:        suite.ID.String(),
 		RepoID:             repo.ID.String(),
 		RepositoryFullName: repo.GithubFullName,
-		LocalPath:          localPath,
 		DefaultBranch:      repo.DefaultBranch,
 		Branch:             req.Branch,
 		CommitHash:         req.CommitHash,
@@ -244,17 +238,11 @@ func (s *TestRunService) RerunRun(ctx context.Context, userID, runID uuid.UUID) 
 		return nil, fmt.Errorf("create rerun: %w", err)
 	}
 
-	localPath := ""
-	if repo.LocalPath != nil {
-		localPath = *repo.LocalPath
-	}
-
 	payload := &model.JobPayload{
 		TestRunID:          newRun.ID.String(),
 		TestSuiteID:        suite.ID.String(),
 		RepoID:             repo.ID.String(),
 		RepositoryFullName: repo.GithubFullName,
-		LocalPath:          localPath,
 		DefaultBranch:      repo.DefaultBranch,
 		Branch:             originalRun.Branch,
 		CommitHash:         originalRun.CommitHash,

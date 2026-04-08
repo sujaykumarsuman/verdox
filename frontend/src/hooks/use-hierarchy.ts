@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import type {
   TestGroup,
   GroupCasesResponse,
-  TestCaseItem,
+  TestCase,
   ReportResponse,
 } from "@/types/test";
 import type { PaginationMeta } from "@/types/repository";
@@ -47,7 +47,7 @@ export function useGroupCases(
   page: number = 1,
   perPage: number = 100
 ) {
-  const [cases, setCases] = useState<TestCaseItem[]>([]);
+  const [cases, setCases] = useState<TestCase[]>([]);
   const [meta, setMeta] = useState<PaginationMeta>({
     page: 1,
     per_page: 100,
@@ -84,7 +84,7 @@ export function useGroupCases(
 }
 
 export function useFailedCases(runId: string) {
-  const [cases, setCases] = useState<TestCaseItem[]>([]);
+  const [cases, setCases] = useState<TestCase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,7 +93,7 @@ export function useFailedCases(runId: string) {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api<TestCaseItem[]>(
+      const data = await api<TestCase[]>(
         `/v1/runs/${runId}/cases/failed`
       );
       setCases(data || []);

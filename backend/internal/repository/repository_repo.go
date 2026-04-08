@@ -35,11 +35,11 @@ func NewRepositoryRepository(db *sqlx.DB) RepositoryRepository {
 func (r *repositoryRepo) Create(ctx context.Context, repo *model.Repository) error {
 	query := `INSERT INTO repositories (github_repo_id, github_full_name, name, description, default_branch)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, clone_status, fork_status, created_at, updated_at`
+		RETURNING id, fork_status, created_at, updated_at`
 	return r.db.QueryRowxContext(ctx, query,
 		repo.GithubRepoID, repo.GithubFullName, repo.Name,
 		repo.Description, repo.DefaultBranch,
-	).Scan(&repo.ID, &repo.CloneStatus, &repo.ForkStatus, &repo.CreatedAt, &repo.UpdatedAt)
+	).Scan(&repo.ID, &repo.ForkStatus, &repo.CreatedAt, &repo.UpdatedAt)
 }
 
 func (r *repositoryRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Repository, error) {

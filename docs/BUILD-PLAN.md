@@ -26,7 +26,7 @@ log in, see a dashboard shell, and hit health endpoints.
 
 | # | Task | Deliverable(s) | Notes |
 |---|------|----------------|-------|
-| 1 | Initialize Go module | `backend/go.mod` (`github.com/sujaykumarsuman/verdox/backend`) | Go 1.25+. Run `go mod init`. |
+| 1 | Initialize Go module | `backend/go.mod` (`github.com/sujaykumarsuman/verdox/backend`) | Go 1.26+. Run `go mod init`. |
 | 2 | Install backend dependencies | `backend/go.sum` | Echo v4, sqlx, pgx, redis/v9, golang-jwt/jwt/v5, viper, zerolog, validator/v10, bcrypt, uuid. |
 | 3 | Initialize Next.js project | `frontend/` (App Router, TypeScript, Tailwind CSS) | `npx create-next-app@15 frontend --typescript --tailwind --app --src-dir`. |
 | 4 | Install frontend dependencies | `frontend/package.json` | next-themes, sonner, clsx, tailwind-merge, lucide-react. |
@@ -38,18 +38,18 @@ log in, see a dashboard shell, and hit health endpoints.
 
 | # | Task | Deliverable(s) | Notes |
 |---|------|----------------|-------|
-| 1 | Write `docker-compose.yml` | `docker-compose.yml` | 6 services: `verdox-nginx` (:80/:443), `verdox-frontend` (:3000), `verdox-backend` (:8080), `verdox-postgres` (:5432), `verdox-redis` (:6379), `verdox-runner`. Internal network `verdox-network`. Healthchecks on postgres and redis. |
+| 1 | Write `docker-compose.yml` | `docker-compose.yml` | 5 services: `verdox-nginx` (:80/:443), `verdox-frontend` (:3000), `verdox-backend` (:8080), `verdox-postgres` (:5432), `verdox-redis` (:6379). Internal network `verdox-network`. Healthchecks on postgres and redis. |
 | 2 | Write `docker-compose.dev.yml` | `docker-compose.dev.yml` | Volume mounts for hot reload (backend source, frontend source). Expose debug ports (5432, 6379). Use `air` for Go hot reload. |
 | 3 | Write backend Dockerfile | `docker/backend.Dockerfile` | Multi-stage: `golang:1.25-alpine` (builder) -> `alpine:3.21` (runtime). CGO_ENABLED=0. Non-root user. ~15 MB final image. |
 | 4 | Write frontend Dockerfile | `docker/frontend.Dockerfile` | Multi-stage: `node:22-alpine` (deps) -> `node:22-alpine` (builder, `next build`) -> `node:22-alpine` (runtime, standalone output). Non-root user. |
-| 5 | Write runner Dockerfile | `docker/runner.Dockerfile` | Based on DinD image. Pre-install Go, Node, Python runtimes for test execution. |
+| 5 | ~~Write runner Dockerfile~~ | N/A | Removed. Test execution uses fork-based GitHub Actions (no runner container needed). |
 | 6 | Write Nginx config | `nginx/nginx.conf`, `nginx/conf.d/default.conf` | Proxy rules: `/api/*` -> backend:8080 (strip `/api` prefix), `/webhooks/*` -> backend:8080 (passthrough), `/*` -> frontend:3000. Worker processes, gzip, log format. |
 
 ### 1.3 Database Setup
 
 | # | Task | Deliverable(s) | Notes |
 |---|------|----------------|-------|
-| 1 | Write migration 000001 | `migrations/000001_create_enum_types.{up,down}.sql` | 6 enum types: `user_role`, `team_member_role`, `team_member_status`, `test_type`, `test_run_status`, `test_result_status`. |
+| 1 | Write migration 000001 | `migrations/000001_create_enum_types.{up,down}.sql` | 6 enum types: `user_role`, `team_member_role`, `team_member_status`, `test_run_status`, `test_result_status`, `notification_type`. (`test_type` was removed; test type is a VARCHAR column instead.) |
 | 2 | Write migration 000002 | `migrations/000002_create_users.{up,down}.sql` | `users` table with UUID PK, username, email, password_hash, role, avatar_url, timestamps. Unique constraints on username and email. |
 | 3 | Write migration 000003 | `migrations/000003_create_sessions.{up,down}.sql` | `sessions` table with FK to users, refresh_token_hash, expires_at. Indexes on user_id and expires_at. |
 | 4 | Write migration 000004 | `migrations/000004_create_repositories.{up,down}.sql` | `repositories` table. Unique on github_repo_id. No owner_id -- repositories are associated to teams via `team_repositories`. |
@@ -213,7 +213,7 @@ for their team, add repos by URL, and browse cloned repositories.
 
 ## Phase 3 -- Test Execution
 
-**Goal:** Test suite CRUD, Redis job queue, Docker-in-Docker runner, test
+**Goal:** Test suite CRUD, Redis job queue, fork-based GHA execution, test
 result parsing, and results display. Users can configure test suites, trigger
 runs, and see results with logs.
 
@@ -276,9 +276,9 @@ runs, and see results with logs.
 
 | # | Task | Deliverable(s) | Notes |
 |---|------|----------------|-------|
-| 1 | Runner Dockerfile | `docker/runner.Dockerfile` (refine) | DinD base. Install Go 1.25, Node 22, Python 3.12 with pytest. Minimal footprint. |
-| 2 | Docker network config | `docker-compose.yml` update | Ensure runner service has access to Docker socket (`/var/run/docker.sock`). Privileged mode for DinD. |
-| 3 | Resource limits | `internal/runner/executor.go` | Memory: 512MB. CPU: 1 core. PID limit: 256. No network by default. Configurable per suite via future config. |
+| 1 | Fork-based GHA executor | `internal/runner/executor.go` | The runner is embedded in the backend server process. Verdox forks repos via a service account, pushes workflow files, and dispatches GitHub Actions runs. No separate runner container needed. |
+| 2 | GHA poller / webhook ingestion | `internal/runner/poller.go` | Poll GitHub Actions run status and ingest workflow_run webhook events to update test run status. |
+| 3 | Resource limits | `internal/runner/executor.go` | Timeout enforcement and cancellation via GitHub Actions API. Configurable per suite via future config. |
 
 ### Phase 3 Confirmation Gate
 
@@ -290,15 +290,15 @@ runs, and see results with logs.
 - [ ] Run numbering assigns sequential run-1, run-2, etc. per suite
 - [ ] Commit-hash caching skips re-run if same commit was already tested on that suite
 - [ ] Worker picks up the job from Redis queue
-- [ ] Worker mounts local clone read-only into ephemeral Docker container
+- [ ] Worker forks repo and dispatches GitHub Actions for isolated execution
 - [ ] Test output is captured and parsed into individual test_results
 - [ ] `GET /api/v1/runs/:id` returns run detail with nested test_results
 - [ ] Test run detail page renders with pass/fail status badges
 - [ ] LogViewer displays test output
 - [ ] `POST /api/v1/runs/:id/cancel` cancels a queued or running test
 - [ ] Polling updates the UI when a run transitions from running to passed/failed
-- [ ] Resource limits are enforced (container is killed if it exceeds memory/timeout)
-- [ ] Container is always cleaned up, even on failure
+- [ ] Timeout enforcement works (GHA run is cancelled if it exceeds configured timeout)
+- [ ] Fork cleanup is handled after run completion
 
 ---
 
@@ -492,8 +492,8 @@ single `docker compose up -d`.
 
 | # | Task | Deliverable(s) | Notes |
 |---|------|----------------|-------|
-| 1 | Lint and test workflow | `.github/workflows/ci.yml` | Trigger on push and PR to main. Steps: checkout, setup Go 1.25, `golangci-lint run`, `go test -race ./...`, setup Node 22, `npm ci`, `npm run lint`, `npm test`. |
-| 2 | Build Docker images workflow | `.github/workflows/build.yml` | Trigger on push to main. Build backend, frontend, runner images. Push to GitHub Container Registry (ghcr.io). Tag with commit SHA and `latest`. |
+| 1 | Lint and test workflow | `.github/workflows/ci.yml` | Trigger on push and PR to main. Steps: checkout, setup Go 1.26, `golangci-lint run`, `go test -race ./...`, setup Node 22, `npm ci`, `npm run lint`, `npm test`. |
+| 2 | Build Docker images workflow | `.github/workflows/build.yml` | Trigger on push to main. Build backend and frontend images. Push to GitHub Container Registry (ghcr.io). Tag with commit SHA and `latest`. |
 | 3 | Deploy workflow (optional) | `.github/workflows/deploy.yml` | Trigger manually or on release tag. SSH to VPS. Pull latest images. Run `docker compose up -d`. Verify health endpoints. |
 
 ### Phase 6 Confirmation Gate
@@ -623,7 +623,7 @@ These practices apply across every phase and are not deferred.
 |-------|-------|-----------------|-----------|
 | 1 | Foundation | Scaffolding, Docker, DB, Auth, Dashboard shell | 8 (auth + health) |
 | 2 | Repositories | GitHub PAT, repo addition + clone, branch/commit browsing | 8 (repo endpoints) |
-| 3 | Test Execution | Suite CRUD, job queue, DinD runner, results | 9 (suite + run endpoints) |
+| 3 | Test Execution | Suite CRUD, job queue, fork-based GHA execution, results | 9 (suite + run endpoints) |
 | 4 | Teams | Team CRUD, members, repo assignment, permissions | 9 (team endpoints) |
 | 5 | Admin & Polish | Admin panel, settings + PAT, dark mode, AI discovery | 7 (admin + user + discovery) |
 | 6 | Deployment | Production config, monitoring, CI/CD | 0 (infra only) |

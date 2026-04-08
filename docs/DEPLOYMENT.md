@@ -1,7 +1,7 @@
 # Verdox -- Deployment & Infrastructure
 
 > Self-hosted test orchestration platform.
-> Go 1.25+ | Echo v4 | Next.js 15 | PostgreSQL 17 | Redis 7 | Docker-in-Docker
+> Go 1.26+ | Echo v4 | Next.js 15 | PostgreSQL 17 | Redis 7
 
 This document defines every configuration file needed to build, deploy, and
 operate the Verdox platform. All files are copy-pasteable and production-ready.
@@ -14,7 +14,7 @@ all other documentation references these definitions.
 
 File: `docker-compose.yml`
 
-This is the production manifest. All six services communicate over a single
+This is the production manifest. All five services communicate over a single
 bridge network. Only Nginx exposes ports to the host.
 
 ```yaml
@@ -85,10 +85,6 @@ services:
     container_name: verdox-backend
     expose:
       - "8080"
-    env_file:
-      - .env
-    volumes:
-      - repodata:/var/lib/verdox/repositories
     depends_on:
       postgres:
         condition: service_healthy
@@ -145,44 +141,10 @@ services:
     networks:
       - verdox-network
 
-  # ──────────────────────────────────────────────
-  # Test Runner (Docker-in-Docker)
-  # ──────────────────────────────────────────────
-  runner:
-    build:
-      context: .
-      dockerfile: docker/runner.Dockerfile
-    container_name: verdox-runner
-    privileged: true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - repodata:/var/lib/verdox/repositories:ro
-    environment:
-      - RUNNER_MAX_CONCURRENT=${RUNNER_MAX_CONCURRENT:-5}
-      - RUNNER_MAX_TIMEOUT=${RUNNER_MAX_TIMEOUT:-1800}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      - DATABASE_URL=${DATABASE_URL:-postgres://verdox:changeme@postgres:5432/verdox?sslmode=disable}
-    depends_on:
-      backend:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "docker", "info"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
-    networks:
-      - verdox-network
-
 volumes:
   pgdata:
     driver: local
   redisdata:
-    driver: local
-  repodata:
     driver: local
 
 networks:
@@ -196,9 +158,6 @@ networks:
   binding to the host. Only `nginx` uses `ports` for host binding.
 - All services use `depends_on` with `condition: service_healthy` to ensure
   correct startup order.
-- The `runner` service runs in `privileged` mode because Docker-in-Docker
-  requires elevated capabilities. See `docs/SECURITY.md` Section 10 for the
-  security controls applied to containers spawned by the runner.
 
 ---
 
@@ -287,14 +246,6 @@ services:
     ports:
       - "6379:6379"
 
-  # ──────────────────────────────────────────────
-  # Runner -- mount socket, expose for debugging
-  # ──────────────────────────────────────────────
-  runner:
-    environment:
-      - RUNNER_MAX_CONCURRENT=2
-      - RUNNER_MAX_TIMEOUT=600
-
 volumes:
   pgdata:
   redisdata:
@@ -312,8 +263,6 @@ volumes:
 | Port 2345 exposed | Delve debugger for Go remote debugging |
 | Port 3000 exposed | Direct frontend access without Nginx for debugging |
 | `WATCHPACK_POLLING=true` | Ensures file change detection inside Docker volumes |
-| Runner concurrency reduced | Saves local machine resources |
-| Runner timeout reduced | Faster feedback during development |
 
 ---
 
@@ -473,86 +422,9 @@ const nextConfig = {
 
 ---
 
-## 5. Runner Dockerfile
+## 5. Nginx Configuration
 
-File: `docker/runner.Dockerfile`
-
-Docker-in-Docker image that runs the test execution worker. The runner needs
-access to the Docker daemon to create ephemeral test containers.
-
-```dockerfile
-# ============================================================
-# DinD-based test runner
-# ============================================================
-FROM docker:27-dind
-
-# Install runtime dependencies
-RUN apk add --no-cache \
-    ca-certificates \
-    tzdata \
-    git \
-    wget \
-    curl \
-    bash
-
-# Create working directory for cloned repositories
-RUN mkdir -p /workspace && chmod 755 /workspace
-
-# Copy the runner binary (built from the same Go backend)
-COPY --from=golang:1.25-alpine /usr/local/go /usr/local/go
-ENV PATH="/usr/local/go/bin:${PATH}"
-
-WORKDIR /runner
-
-# Copy Go module files for dependency caching
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download && go mod verify
-
-# Copy backend source (runner shares code with the backend)
-COPY backend/ .
-
-# Build the runner binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s" \
-    -o /runner-bin \
-    ./cmd/runner
-
-# Clean up Go toolchain from final layer
-RUN rm -rf /usr/local/go /runner
-
-ENV DOCKER_TLS_CERTDIR=""
-
-EXPOSE 2375 2376
-
-ENTRYPOINT ["sh", "-c", "dockerd-entrypoint.sh & sleep 3 && /runner-bin"]
-```
-
-**Build details:**
-
-| Property | Value |
-|----------|-------|
-| Base image | `docker:27-dind` |
-| Includes | Docker daemon, Git, Go runner binary |
-| Privileged | Yes (required for nested Docker) |
-| Workspace | `/workspace` for temporary repository clones |
-| Entry | Starts Docker daemon, then the runner binary |
-
-**Security controls applied to spawned containers** (see `docs/SECURITY.md`
-Section 10):
-
-- CPU limit: 2 cores (`--cpus=2`)
-- Memory limit: 2 GB (`--memory=2g`)
-- PID limit: 256 processes (`--pids-limit=256`)
-- Network: Isolated per test run
-- Filesystem: Read-only root, writable tmpfs only
-- No host volume mounts
-- No Docker socket access from test containers
-
----
-
-## 6. Nginx Configuration
-
-### 6.1 Main Configuration
+### 5.1 Main Configuration
 
 File: `nginx/nginx.conf`
 
@@ -632,7 +504,7 @@ http {
 }
 ```
 
-### 6.2 Server Block
+### 5.2 Server Block
 
 File: `nginx/conf.d/default.conf`
 
@@ -808,7 +680,7 @@ server {
 
 ---
 
-## 7. Environment Variables
+## 6. Environment Variables
 
 File: `.env.example`
 
@@ -967,22 +839,6 @@ NEXT_PUBLIC_API_URL=http://localhost/api
 # Default: http://localhost:3000
 FRONTEND_URL=http://localhost:3000
 
-# ============================================================
-# Test Runner
-# ============================================================
-
-# RUNNER_MAX_CONCURRENT: Max test containers running simultaneously
-# Type: integer
-# Required: no
-# Default: 5
-# Note: Each concurrent run consumes up to 2 CPU cores and 2 GB RAM
-RUNNER_MAX_CONCURRENT=5
-
-# RUNNER_MAX_TIMEOUT: Max seconds a single test run may execute
-# Type: integer
-# Required: no
-# Default: 1800 (30 minutes)
-RUNNER_MAX_TIMEOUT=1800
 ```
 
 **Variable summary:**
@@ -1006,12 +862,10 @@ RUNNER_MAX_TIMEOUT=1800
 | `GITHUB_TOKEN_ENCRYPTION_KEY` | Yes | -- | AES-256-GCM key for team-level PAT encryption |
 | `NEXT_PUBLIC_API_URL` | Yes | `http://localhost/api` | Browser-facing API base URL |
 | `FRONTEND_URL` | Yes | `http://localhost:3000` | Frontend origin for CORS |
-| `RUNNER_MAX_CONCURRENT` | No | `5` | Max parallel test containers |
-| `RUNNER_MAX_TIMEOUT` | No | `1800` | Test run timeout in seconds |
 
 ---
 
-## 8. Makefile
+## 7. Makefile
 
 File: `Makefile` (project root)
 
@@ -1029,9 +883,9 @@ All targets are self-documented. Run `make help` to list available commands.
 # Variables
 # ────────────────────────────────────────
 COMPOSE         := docker compose
-COMPOSE_DEV     := $(COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml
+COMPOSE_DEV     := $(COMPOSE) --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml
 MIGRATE         := migrate
-MIGRATE_DB_URL  ?= postgres://verdox:changeme@localhost:5432/verdox?sslmode=disable
+MIGRATE_DB_URL  ?= postgres://verdox:verdoxpass@localhost:5432/verdox?sslmode=disable
 MIGRATION_DIR   := backend/migrations
 
 # ============================================================
@@ -1050,7 +904,14 @@ help: ## Show this help message
 # ============================================================
 
 dev: ## Start full stack with hot reload (docker-compose.dev.yml)
-	$(COMPOSE_DEV) up --build
+	@echo "Starting postgres and redis..."
+	@$(COMPOSE_DEV) up -d postgres redis
+	@echo "Waiting for PostgreSQL to be ready..."
+	@until $(COMPOSE_DEV) exec postgres pg_isready -U verdox -d verdox > /dev/null 2>&1; do sleep 1; done
+	@echo "Running migrations..."
+	@$(MIGRATE) -path $(MIGRATION_DIR) -database "$(MIGRATE_DB_URL)" up || true
+	@echo "Starting all services..."
+	$(COMPOSE_DEV) up -d --build
 
 dev-backend: ## Start backend only with air (Go hot reload)
 	cd backend && go install github.com/air-verse/air@latest && air -c .air.toml
@@ -1077,8 +938,9 @@ build-frontend: ## Build frontend Docker image
 up: ## Start the production stack (detached)
 	$(COMPOSE) up -d --build
 
-down: ## Stop and remove all containers
-	$(COMPOSE) down
+down: ## Stop and remove all containers and volumes
+	$(COMPOSE) down -v --remove-orphans
+	@docker volume prune -f > /dev/null 2>&1 || true
 
 logs: ## Tail logs for all services (Ctrl+C to stop)
 	$(COMPOSE) logs -f
@@ -1145,7 +1007,7 @@ clean: ## Remove all containers, volumes, and build artifacts
 | `make build-backend` | Build backend Docker image only |
 | `make build-frontend` | Build frontend Docker image only |
 | `make up` | Start production stack in detached mode |
-| `make down` | Stop and remove all containers |
+| `make down` | Stop and remove all containers, volumes, and orphans |
 | `make logs` | Tail logs from all services |
 | `make migrate-up` | Apply all pending database migrations |
 | `make migrate-down` | Rollback the most recent migration |
@@ -1159,7 +1021,7 @@ clean: ## Remove all containers, volumes, and build artifacts
 
 ---
 
-## 9. Docker Networks
+## 8. Docker Networks
 
 All services connect to a single bridge network named `verdox-network`.
 
@@ -1169,8 +1031,7 @@ verdox-network (bridge)
 ├── verdox-frontend    ← expose 3000 (internal only)
 ├── verdox-backend     ← expose 8080 (internal only)
 ├── verdox-postgres    ← expose 5432 (internal only)
-├── verdox-redis       ← expose 6379 (internal only)
-└── verdox-runner      ← no exposed ports
+└── verdox-redis       ← expose 6379 (internal only)
 ```
 
 **Network rules:**
@@ -1182,7 +1043,6 @@ verdox-network (bridge)
 | Backend host port | None | 8080 |
 | PostgreSQL host port | None | 5432 |
 | Redis host port | None | 6379 |
-| Runner host port | None | None |
 
 **DNS resolution:** Docker's built-in DNS allows services to reference each other
 by container name. The backend connects to `postgres:5432` and `redis:6379`
@@ -1196,28 +1056,27 @@ the internet.
 
 ---
 
-## 10. Volumes and Data Persistence
+## 9. Volumes and Data Persistence
 
-### 10.1 Named Volumes
+### 9.1 Named Volumes
 
 | Volume | Container Mount | Purpose |
 |--------|----------------|---------|
 | `pgdata` | `/var/lib/postgresql/data` | PostgreSQL data directory (tables, indexes, WAL) |
 | `redisdata` | `/data` | Redis AOF persistence file |
-| `repodata` | `/var/lib/verdox/repositories` | Cloned Git repositories for test execution |
 
 Both volumes use the `local` driver and persist data across container restarts
 and image rebuilds. Data survives `docker compose down` but is destroyed by
 `docker compose down -v`.
 
-### 10.2 Development-Only Volumes
+### 9.2 Development-Only Volumes
 
 | Volume | Purpose |
 |--------|---------|
 | `frontend_node_modules` | Preserves `node_modules` across container recreations |
 | `gomodcache` | Caches Go module downloads for faster rebuilds |
 
-### 10.3 Backup Procedures
+### 9.3 Backup Procedures
 
 **PostgreSQL backup:**
 
@@ -1249,7 +1108,7 @@ docker run --rm \
     alpine tar czf /backup/pgdata_$(date +%Y%m%d).tar.gz -C /source .
 ```
 
-### 10.4 Backup Schedule Recommendations
+### 9.4 Backup Schedule Recommendations
 
 | Data | Frequency | Retention | Method |
 |------|-----------|-----------|--------|
@@ -1258,7 +1117,7 @@ docker run --rm \
 | Redis | Daily | 7 days | RDB snapshot copy |
 | Application logs | -- | 14 days | Docker log rotation (see below) |
 
-### 10.5 Docker Log Rotation
+### 9.5 Docker Log Rotation
 
 Add to `docker-compose.yml` for each service to prevent unbounded log growth:
 
