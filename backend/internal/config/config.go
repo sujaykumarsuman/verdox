@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"time"
 
@@ -62,8 +63,21 @@ func (c *Config) IsProduction() bool {
 }
 
 func Load() (*Config, error) {
-	viper.SetConfigFile(".env")
 	viper.AutomaticEnv()
+
+	// Determine which env file to load:
+	//   development → .env.dev  (dev only needs .env.dev)
+	//   production  → .env      (prod only needs .env)
+	//   other       → .env.<APP_ENV>, fallback to .env
+	appEnv := os.Getenv("APP_ENV")
+	switch appEnv {
+	case "development":
+		viper.SetConfigFile(".env.dev")
+	case "", "production":
+		viper.SetConfigFile(".env")
+	default:
+		viper.SetConfigFile(".env." + appEnv)
+	}
 
 	// Set defaults
 	viper.SetDefault("APP_ENV", "development")
