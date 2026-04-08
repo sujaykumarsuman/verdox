@@ -251,12 +251,9 @@ func (s *TestRunService) RerunRun(ctx context.Context, userID, runID uuid.UUID) 
 		TimeoutSeconds:     suite.TimeoutSeconds,
 	}
 
-	// If the original run reached GHA, use GitHub's rerun API.
-	// Otherwise (setup failure before dispatch), do a fresh dispatch.
-	if originalRun.GHARunID != nil {
-		payload.IsRerun = true
-		payload.OriginalGHARunID = *originalRun.GHARunID
-	}
+	// Always do a fresh workflow_dispatch for reruns. GitHub's rerun API
+	// re-runs the exact same workflow run ID, which can trigger the wrong
+	// workflow if the fork has multiple workflows (e.g., upstream CI).
 
 	if err := s.queue.Push(ctx, payload); err != nil {
 		return nil, fmt.Errorf("push rerun job: %w", err)

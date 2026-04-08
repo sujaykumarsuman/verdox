@@ -413,7 +413,7 @@ Next.js route groups (directories wrapped in parentheses) share a layout without
 
 ```
 docker/
-├── backend.Dockerfile        # Multi-stage Go build: golang:1.25-alpine -> alpine:3.21
+├── backend.Dockerfile        # Multi-stage Go build: golang:1.26-alpine -> alpine:3.21
 └── frontend.Dockerfile       # Multi-stage Node build: node:22-alpine -> node:22-alpine
 
 nginx/
@@ -428,7 +428,7 @@ nginx/
 
 | Stage | Base Image | Purpose |
 |-------|-----------|---------|
-| `builder` | `golang:1.25-alpine` | Downloads dependencies, compiles the binary with CGO disabled. |
+| `builder` | `golang:1.26-alpine` | Downloads dependencies, compiles the binary with CGO disabled. |
 | `runtime` | `alpine:3.21` | Copies only the compiled binary. Adds CA certificates and a non-root user. Final image is ~15 MB. |
 
 **`frontend.Dockerfile`**

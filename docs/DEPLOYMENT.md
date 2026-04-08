@@ -212,9 +212,9 @@ services:
   # ──────────────────────────────────────────────
   backend:
     build: !reset null
-    image: golang:1.25-alpine
+    image: golang:1.26-alpine
     working_dir: /app
-    command: sh -c "go install github.com/air-verse/air@latest && air -c .air.toml"
+    command: sh -c "apk add --no-cache git >/dev/null 2>&1; go mod vendor && go install github.com/air-verse/air@latest && air -c .air.toml"
     volumes:
       - ./backend:/app
       - gomodcache:/go/pkg/mod
@@ -277,7 +277,7 @@ compiled Go binary, CA certificates, timezone data, and migration files.
 # ============================================================
 # Stage 1: Build the Go binary
 # ============================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git
 
@@ -325,7 +325,7 @@ ENTRYPOINT ["/server"]
 
 | Property | Value |
 |----------|-------|
-| Build base | `golang:1.25-alpine` |
+| Build base | `golang:1.26-alpine` |
 | Runtime base | `alpine:3.21` |
 | CGO | Disabled (`CGO_ENABLED=0`) |
 | Linker flags | `-w -s` (strip debug info and symbol table) |
