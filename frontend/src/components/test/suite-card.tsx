@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { triggerRun, deleteTestSuite } from "@/hooks/use-tests";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { TestSuite, TestRun, TestRunDetailV2, RunSummaryV2 } from "@/types/test";
+import type { TestSuite, TestRun, TestRunDetailV2, TestRunListResponse, RunSummaryV2 } from "@/types/test";
 
 interface SuiteCardProps {
   suite: TestSuite;
@@ -63,17 +63,36 @@ export function SuiteCard({
   const [deleting, setDeleting] = useState(false);
   const [summary, setSummary] = useState<RunSummaryV2 | null>(null);
 
-  // Fetch run detail for summary gauge (only for terminal runs)
+  // Fetch run detail for summary gauge (only for terminal runs).
+  // If the latest run has no summary (e.g. setup failure), look at recent runs
+  // to find one that does.
   const fetchSummary = useCallback(async () => {
     if (!latestRun || latestRun.status === "queued" || latestRun.status === "running") {
       setSummary(null);
       return;
     }
     try {
+      // Try the latest run first
       const data = await api<TestRunDetailV2>(`/v1/runs/${latestRun.id}`);
-      if (data.summary_v2) setSummary(data.summary_v2);
+      if (data.summary_v2) {
+        setSummary(data.summary_v2);
+        return;
+      }
+      // No summary on latest run — check recent runs for one with results
+      const recent = await api<TestRunListResponse>(`/v1/suites/${suite.id}/runs?page=1&per_page=5`);
+      if (recent.runs) {
+        for (const run of recent.runs) {
+          if (run.id === latestRun.id) continue;
+          if (run.status !== "passed" && run.status !== "failed") continue;
+          const detail = await api<TestRunDetailV2>(`/v1/runs/${run.id}`);
+          if (detail.summary_v2) {
+            setSummary(detail.summary_v2);
+            return;
+          }
+        }
+      }
     } catch { /* */ }
-  }, [latestRun]);
+  }, [latestRun, suite.id]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
