@@ -105,7 +105,7 @@ func main() {
 	redisQueue := queue.NewRedisQueue(rdb, cfg.RunnerMaxTimeout, log)
 
 	// GHA poller for tracking dispatched GitHub Actions workflows
-	ghaPoller := runner.NewGHAPoller(db, log)
+	ghaPoller := runner.NewGHAPoller(db, cfg.ServiceAccountPAT, log)
 
 	// Fork GHA executor (uses service account)
 	forkService := service.NewForkService(cfg, db, log)

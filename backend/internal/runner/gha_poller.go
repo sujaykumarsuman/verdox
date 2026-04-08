@@ -46,16 +46,18 @@ type GHAPoller struct {
 	activeRuns     map[string]*activeGHARun // verdox run_id -> tracking data
 	pollInterval   time.Duration
 	cancelFunc     context.CancelFunc
+	serviceAcctPAT string
 }
 
-func NewGHAPoller(db *sqlx.DB, log zerolog.Logger) *GHAPoller {
+func NewGHAPoller(db *sqlx.DB, serviceAcctPAT string, log zerolog.Logger) *GHAPoller {
 	return &GHAPoller{
-		db:           db,
-		client:       &http.Client{Timeout: 30 * time.Second},
-		log:          log,
-		parser:       NewParser(),
-		activeRuns:   make(map[string]*activeGHARun),
-		pollInterval: 15 * time.Second,
+		db:             db,
+		client:         &http.Client{Timeout: 30 * time.Second},
+		log:            log,
+		parser:         NewParser(),
+		activeRuns:     make(map[string]*activeGHARun),
+		pollInterval:   15 * time.Second,
+		serviceAcctPAT: serviceAcctPAT,
 	}
 }
 
@@ -562,9 +564,65 @@ func (p *GHAPoller) ingestHierarchicalArtifact(ctx context.Context, runID uuid.U
 }
 
 // recoverActiveRuns loads GHA runs that were dispatched but not completed.
+// This handles backend restarts and Redis flushes — any run with status
+// 'running' and a gha_run_id is re-registered for polling.
 func (p *GHAPoller) recoverActiveRuns(ctx context.Context) {
-	// Note: Crash recovery for GHA runs requires the PAT to be available.
-	// Since we don't store PATs in test_runs, recovery is best-effort.
-	// The runs will be detected as stale and eventually marked as failed.
 	p.log.Info().Msg("GHA poller recovery: checking for orphaned runs")
+
+	var orphans []struct {
+		RunID          uuid.UUID `db:"id"`
+		GHARunID       *int64    `db:"gha_run_id"`
+		CommitHash     string    `db:"commit_hash"`
+		Branch         string    `db:"branch"`
+		SuiteID        uuid.UUID `db:"test_suite_id"`
+		ForkFullName   *string   `db:"fork_full_name"`
+		RepoID         uuid.UUID `db:"repo_id"`
+		RepoFullName   string    `db:"repo_full_name"`
+		DefaultBranch  string    `db:"default_branch"`
+	}
+
+	query := `
+		SELECT tr.id, tr.gha_run_id, tr.commit_hash, tr.branch, tr.test_suite_id,
+		       r.fork_full_name, r.id AS repo_id, r.github_full_name AS repo_full_name,
+		       r.default_branch
+		FROM test_runs tr
+		JOIN test_suites ts ON ts.id = tr.test_suite_id
+		JOIN repositories r ON r.id = ts.repository_id
+		WHERE tr.status = 'running' AND tr.gha_run_id IS NOT NULL
+	`
+
+	if err := p.db.SelectContext(ctx, &orphans, query); err != nil {
+		p.log.Error().Err(err).Msg("GHA poller recovery: failed to query orphaned runs")
+		return
+	}
+
+	if len(orphans) == 0 {
+		p.log.Info().Msg("GHA poller recovery: no orphaned runs found")
+		return
+	}
+
+	p.mu.Lock()
+	for _, o := range orphans {
+		forkName := o.RepoFullName
+		if o.ForkFullName != nil && *o.ForkFullName != "" {
+			forkName = *o.ForkFullName
+		}
+
+		runIDStr := o.RunID.String()
+		p.activeRuns[runIDStr] = &activeGHARun{
+			RunID: o.RunID,
+			Job: &ExecutionJob{
+				RunID:              o.RunID,
+				SuiteID:            o.SuiteID,
+				RepoID:             o.RepoID,
+				RepositoryFullName: forkName,
+				DefaultBranch:      o.DefaultBranch,
+				Branch:             o.Branch,
+				CommitHash:         o.CommitHash,
+			},
+			PAT: p.serviceAcctPAT,
+		}
+		p.log.Info().Str("run_id", runIDStr).Int64("gha_run_id", *o.GHARunID).Msg("GHA poller recovery: re-registered orphaned run")
+	}
+	p.mu.Unlock()
 }
