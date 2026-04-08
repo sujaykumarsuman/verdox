@@ -1,13 +1,15 @@
 package dto
 
-// ImportSuiteRequest — exactly one of WorkflowFile or WorkflowYAML must be set.
-type ImportSuiteRequest struct {
-	WorkflowFile *string `json:"workflow_file"`
-	WorkflowYAML *string `json:"workflow_yaml"`
+// GenerateSuiteRequest — exactly one of WorkflowFile or WorkflowYAML must be set.
+type GenerateSuiteRequest struct {
+	WorkflowFile   *string `json:"workflow_file"`
+	WorkflowYAML   *string `json:"workflow_yaml"`
+	Model          string  `json:"model"`
+	TimeoutSeconds int     `json:"timeout_seconds"`
 }
 
-// ImportSuiteResponse contains pre-fill data for the suite creation form.
-type ImportSuiteResponse struct {
+// GenerateSuiteResponse contains pre-fill data for the suite creation form.
+type GenerateSuiteResponse struct {
 	Name           string `json:"name"`
 	Type           string `json:"type"`
 	TimeoutSeconds int    `json:"timeout_seconds"`

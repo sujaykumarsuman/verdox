@@ -26,7 +26,11 @@ export function useRepositories(
   const [error, setError] = useState<string | null>(null);
 
   const fetchRepos = useCallback(async () => {
-    if (!teamId) return;
+    if (!teamId) {
+      setIsLoading(false);
+      setRepos([]);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -46,7 +50,8 @@ export function useRepositories(
       setRepos(data.repositories || []);
       setMeta(data.meta);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load repositories");
+      const msg = err instanceof Error ? err.message : "Failed to load repositories";
+      setError(msg === "Failed to fetch" ? "Unable to reach the server. Check your connection and try again." : msg);
     } finally {
       setIsLoading(false);
     }

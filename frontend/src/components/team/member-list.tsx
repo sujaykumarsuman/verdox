@@ -27,14 +27,18 @@ export function MemberList({
 }: MemberListProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [roleDropdown, setRoleDropdown] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const isAdmin = currentUserRole === "admin";
   const isAdminOrMaintainer = isAdmin || currentUserRole === "maintainer";
 
   const handleApprove = async (userId: string) => {
     setLoading(userId);
+    setError(null);
     try {
       await updateMember(teamId, userId, { status: "approved" });
       onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to approve member");
     } finally {
       setLoading(null);
     }
@@ -42,9 +46,12 @@ export function MemberList({
 
   const handleReject = async (userId: string) => {
     setLoading(userId);
+    setError(null);
     try {
       await updateMember(teamId, userId, { status: "rejected" });
       onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject member");
     } finally {
       setLoading(null);
     }
@@ -53,9 +60,12 @@ export function MemberList({
   const handleRoleChange = async (userId: string, role: TeamRole) => {
     setLoading(userId);
     setRoleDropdown(null);
+    setError(null);
     try {
       await updateMember(teamId, userId, { role });
       onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to change role");
     } finally {
       setLoading(null);
     }
@@ -63,9 +73,12 @@ export function MemberList({
 
   const handleRemove = async (userId: string) => {
     setLoading(userId);
+    setError(null);
     try {
       await removeMember(teamId, userId);
       onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove member");
     } finally {
       setLoading(null);
     }
@@ -73,6 +86,12 @@ export function MemberList({
 
   return (
     <div className="overflow-x-auto">
+      {error && (
+        <div className="mb-3 px-3 py-2 rounded-[6px] bg-[var(--danger)]/10 border border-[var(--danger)]/20 text-[var(--danger)] text-[13px] flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-2 text-[var(--danger)] hover:opacity-70">&times;</button>
+        </div>
+      )}
       <table className="w-full text-[14px]">
         <thead>
           <tr className="border-b border-border text-left text-text-secondary">

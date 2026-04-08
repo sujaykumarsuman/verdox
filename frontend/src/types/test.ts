@@ -118,7 +118,7 @@ export interface WorkflowConfig {
   concurrency?: WorkflowConcurrency | null;
 }
 
-// --- Import Suite Types ---
+// --- Generate Suite Types ---
 
 export interface WorkflowFile {
   name: string;
@@ -130,7 +130,7 @@ export interface ListWorkflowFilesResponse {
   files: WorkflowFile[];
 }
 
-export interface ImportSuiteResponse {
+export interface GenerateSuiteResponse {
   name: string;
   type: string;
   timeout_seconds: number;

@@ -173,17 +173,17 @@ func registerHierarchyRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *
 	reports.GET("/:reportId", hierarchyHandler.GetReport)
 }
 
-func registerImportRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+func registerGenerateSuiteRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
 	repoRepo := repository.NewRepositoryRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
-	importService := service.NewImportService(repoRepo, cfg, log)
-	importHandler := handler.NewImportHandler(importService)
+	genSuiteService := service.NewGenerateSuiteService(repoRepo, cfg, log)
+	genSuiteHandler := handler.NewGenerateSuiteHandler(genSuiteService)
 
 	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
 	repos := e.Group("/v1/repositories", authMiddleware)
-	repos.GET("/:id/workflows", importHandler.ListWorkflows)
-	repos.POST("/:id/import-suite", importHandler.ImportSuite)
+	repos.GET("/:id/workflows", genSuiteHandler.ListWorkflows)
+	repos.POST("/:id/generate-suite", genSuiteHandler.GenerateSuite)
 }
 
 func registerUserRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
