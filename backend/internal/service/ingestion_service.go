@@ -126,6 +126,9 @@ func (s *IngestionService) IngestForRun(ctx context.Context, runID uuid.UUID, pa
 	for _, job := range payload.Jobs {
 		for _, pt := range job.Tests {
 			group, cases := s.buildGroupAndCases(runID, pt, sortOrder)
+			// Prefix group_id with job_id to avoid collisions when multiple jobs
+			// test the same packages (e.g. go-test-ce and go-test-enterprise both test ./...)
+			group.GroupID = job.JobID + "/" + group.GroupID
 			groups = append(groups, group)
 			perGroup = append(perGroup, groupCases{cases: cases})
 			sortOrder++

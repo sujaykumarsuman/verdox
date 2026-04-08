@@ -41,6 +41,7 @@ type Config struct {
 	RunnerDefaultImage  string `mapstructure:"RUNNER_DEFAULT_IMAGE"`
 
 	OpenAIAPIKey   string `mapstructure:"VERDOX_OPENAI_API_KEY"`
+	AIContextPath  string `mapstructure:"VERDOX_AI_CONTEXT_PATH"`
 	WebhookBaseURL string `mapstructure:"VERDOX_WEBHOOK_BASE_URL"`
 
 	// Service account for fork-based GHA execution
@@ -79,6 +80,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("RUNNER_MAX_CONCURRENT", 5)
 	viper.SetDefault("RUNNER_MAX_TIMEOUT", 1800)
 	viper.SetDefault("RUNNER_DEFAULT_IMAGE", "alpine:3.21")
+	viper.SetDefault("VERDOX_AI_CONTEXT_PATH", "./ai/res/docs")
 
 	// Explicitly bind all config keys so AutomaticEnv picks up env vars
 	for _, key := range []string{
@@ -93,7 +95,7 @@ func Load() (*Config, error) {
 		"VERDOX_REPO_BASE_PATH",
 		"GITHUB_TOKEN_ENCRYPTION_KEY",
 		"RUNNER_MAX_CONCURRENT", "RUNNER_MAX_TIMEOUT", "RUNNER_DEFAULT_IMAGE",
-		"VERDOX_OPENAI_API_KEY", "VERDOX_WEBHOOK_BASE_URL",
+		"VERDOX_OPENAI_API_KEY", "VERDOX_AI_CONTEXT_PATH", "VERDOX_WEBHOOK_BASE_URL",
 		"VERDOX_SERVICE_ACCOUNT_PAT", "VERDOX_SERVICE_ACCOUNT_USERNAME",
 	} {
 		_ = viper.BindEnv(key)

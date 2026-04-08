@@ -34,6 +34,7 @@ type UpdateTestSuiteRequest struct {
 	GHAWorkflowID   *string               `json:"gha_workflow_id" validate:"omitempty,max=255"`
 	EnvVars         map[string]string      `json:"env_vars"`
 	ConfigPath      *string               `json:"config_path"`
+	WorkflowYAML    *string               `json:"workflow_yaml"`
 }
 
 // --- Responses ---

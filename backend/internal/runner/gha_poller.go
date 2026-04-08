@@ -298,6 +298,10 @@ func (p *GHAPoller) handleCompletion(ctx context.Context, active *activeGHARun, 
 			Status:    summaryStatus,
 			LogOutput: &logOutput,
 		}
+		// Also set error_message on failures so the UI can show the expandable error
+		if finalStatus == model.TestRunStatusFailed {
+			summaryResult.ErrorMessage = &logOutput
+		}
 		if err := resultRepo.BatchCreate(ctx, []model.TestResult{summaryResult}); err != nil {
 			p.log.Error().Err(err).Msg("failed to store summary test result")
 		}

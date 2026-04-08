@@ -17,11 +17,18 @@ import {
   ChevronRight,
   ExternalLink,
   RotateCw,
+  Pencil,
+  RotateCcw,
+  X,
 } from "lucide-react";
-import { useTestRuns } from "@/hooks/use-tests";
+import { toast } from "sonner";
+import { useTestRuns, updateTestSuite, rerunRun } from "@/hooks/use-tests";
 import { useRunGroups, useGroupCases } from "@/hooks/use-hierarchy";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { RunStatusBadge, ResultStatusBadge } from "@/components/test/status-badge";
+import { WorkflowEditor } from "@/components/test/workflow-editor";
 import { StatsBar } from "@/components/test/stats-bar";
 import { formatDate, cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -79,7 +86,7 @@ function useSuiteDetail(suiteId: string) {
     }
   }, [suiteId]);
   useEffect(() => { fetchSuite(); }, [fetchSuite]);
-  return { suite, isLoading, error };
+  return { suite, isLoading, error, refetch: fetchSuite };
 }
 
 function useRunDetail(runId: string) {
@@ -166,9 +173,11 @@ export default function SuiteDetailPage({
   params: Promise<{ id: string; suiteId: string }>;
 }) {
   const { id: repoId, suiteId } = use(params);
-  const { suite, isLoading: suiteLoading, error: suiteError } = useSuiteDetail(suiteId);
-  const { runs, isLoading: runsLoading } = useTestRuns(suiteId, 1);
+  const { suite, isLoading: suiteLoading, error: suiteError, refetch: refetchSuite } = useSuiteDetail(suiteId);
+  const { runs, isLoading: runsLoading, refetch: refetchRuns } = useTestRuns(suiteId, 1);
   const [selectedRunId, setSelectedRunId] = useState<string>("");
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
 
   // Auto-select latest run
   useEffect(() => {
@@ -230,6 +239,13 @@ export default function SuiteDetailPage({
               {suite.name}
             </h1>
             <Badge variant="neutral">{suite.type}</Badge>
+            <button
+              onClick={() => setShowEditDialog(true)}
+              className="text-text-secondary hover:text-text-primary transition-colors"
+              title="Edit suite"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
           </div>
           {selectedRun && (
             <div className="flex items-center gap-3 text-[13px] text-text-secondary">
@@ -251,8 +267,30 @@ export default function SuiteDetailPage({
           )}
         </div>
 
-        {/* Run selector */}
-        <div className="shrink-0">
+        {/* Run selector + Rerun */}
+        <div className="flex items-center gap-2 shrink-0">
+          {isTerminal && selectedRun?.status !== "passed" && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={async () => {
+                setRerunning(true);
+                try {
+                  await rerunRun(selectedRunId);
+                  toast.success("Rerun triggered");
+                  refetchRuns();
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Rerun failed");
+                } finally {
+                  setRerunning(false);
+                }
+              }}
+              loading={rerunning}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Rerun
+            </Button>
+          )}
           {runsLoading ? (
             <div className="w-24 h-8 bg-bg-tertiary rounded animate-pulse" />
           ) : runs.length > 0 ? (
@@ -332,6 +370,93 @@ export default function SuiteDetailPage({
       {!runsLoading && runs.length === 0 && (
         <div className="text-center py-12 text-[14px] text-text-secondary">No runs yet — trigger a run from the repository page</div>
       )}
+
+      {/* Edit Suite Dialog */}
+      {showEditDialog && suite && (
+        <EditSuiteDialog
+          suite={suite}
+          onClose={() => setShowEditDialog(false)}
+          onSaved={() => { setShowEditDialog(false); refetchSuite(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Edit Suite Dialog ────────────────────────────────────────────────
+
+const TYPE_OPTIONS = ["unit", "integration", "e2e", "lint", "smoke", "build", "race", "compatibility", "load"];
+
+function EditSuiteDialog({ suite, onClose, onSaved }: { suite: TestSuite; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(suite.name);
+  const [type, setType] = useState(suite.type);
+  const [timeout, setTimeout] = useState(suite.timeout_seconds || 300);
+  const [workflowYaml, setWorkflowYaml] = useState(suite.workflow_yaml || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) { toast.error("Suite name is required"); return; }
+    setSaving(true);
+    try {
+      await updateTestSuite(suite.id, {
+        name: name.trim(),
+        type,
+        timeout_seconds: timeout,
+        workflow_yaml: workflowYaml,
+      });
+      toast.success("Suite updated");
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update suite");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-[8px] border bg-bg-secondary shadow-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[18px] font-semibold text-text-primary">Edit Suite</h2>
+          <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="block text-[13px] font-medium text-text-secondary mb-1.5">Suite Name</label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-text-secondary mb-1.5">Type</label>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full px-3 py-2 text-[14px] rounded-[6px] border border-[var(--border)] bg-bg-primary text-text-primary focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+            >
+              {TYPE_OPTIONS.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-text-secondary mb-1.5">Timeout (seconds)</label>
+            <Input type="number" value={timeout} onChange={(e) => setTimeout(Number(e.target.value))} min={30} max={3600} />
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-[13px] font-medium text-text-secondary mb-1.5">Workflow YAML</label>
+          <WorkflowEditor value={workflowYaml} onChange={setWorkflowYaml} />
+        </div>
+
+        <div className="flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSave} loading={saving}>Save Changes</Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -513,28 +638,29 @@ function CaseRow({ testCase }: { testCase: TestCaseItem }) {
 
 // ─── Flat Result Row (for old runs without hierarchy) ──────────────────
 
-function FlatResultRow({ result }: { result: { id: string; test_name: string; status: string; duration_ms: number | null; error_message: string | null } }) {
+function FlatResultRow({ result }: { result: { id: string; test_name: string; status: string; duration_ms: number | null; error_message: string | null; log_output?: string | null } }) {
   const [expanded, setExpanded] = useState(false);
+  const detail = result.error_message || result.log_output;
   const icon = result.status === "pass"
     ? <CheckCircle2 size={14} className="text-[var(--success)]" />
-    : result.status === "fail"
+    : result.status === "fail" || result.status === "error"
       ? <XCircle size={14} className="text-[var(--danger)]" />
       : <MinusCircle size={14} className="text-[var(--warning)]" />;
 
   return (
     <div className="border-b border-[var(--border)] last:border-b-0">
       <button
-        onClick={() => result.error_message && setExpanded(!expanded)}
-        className={`w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-bg-tertiary/30 ${result.error_message ? "cursor-pointer" : ""}`}
+        onClick={() => detail && setExpanded(!expanded)}
+        className={`w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-bg-tertiary/30 ${detail ? "cursor-pointer" : ""}`}
       >
         {icon}
         <span className="flex-1 text-[13px] font-mono text-text-primary truncate">{result.test_name}</span>
-        <Badge variant={result.status === "pass" ? "success" : result.status === "fail" ? "danger" : "warning"}>{result.status}</Badge>
+        <Badge variant={result.status === "pass" ? "success" : result.status === "fail" || result.status === "error" ? "danger" : "warning"}>{result.status}</Badge>
         <span className="w-16 text-right text-[12px] text-text-secondary">{formatDuration(result.duration_ms)}</span>
       </button>
-      {expanded && result.error_message && (
+      {expanded && detail && (
         <div className="px-5 pb-3">
-          <pre className="bg-bg-tertiary rounded-[6px] p-3 text-[12px] font-mono text-[var(--danger)] overflow-x-auto whitespace-pre-wrap">{result.error_message}</pre>
+          <pre className="bg-bg-tertiary rounded-[6px] p-3 text-[12px] font-mono text-[var(--danger)] overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto">{detail}</pre>
         </div>
       )}
     </div>

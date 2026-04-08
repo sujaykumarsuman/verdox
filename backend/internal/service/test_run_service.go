@@ -17,9 +17,10 @@ import (
 )
 
 var (
-	ErrRunNotFound     = errors.New("test run not found")
-	ErrRunConflict     = errors.New("a run for this commit is already queued or running")
+	ErrRunNotFound       = errors.New("test run not found")
+	ErrRunConflict       = errors.New("a run for this commit is already queued or running")
 	ErrRunNotCancellable = errors.New("run is already in a terminal state")
+	ErrRunNotRerunnable  = errors.New("run is not in a failed state or has no GHA run ID")
 )
 
 type TestRunService struct {
@@ -178,6 +179,102 @@ func (s *TestRunService) TriggerRun(ctx context.Context, userID, suiteID uuid.UU
 	}
 
 	resp := dto.NewTestRunResponse(run)
+	return &resp, nil
+}
+
+// RerunRun re-triggers a failed GHA workflow run via the GitHub rerun API.
+func (s *TestRunService) RerunRun(ctx context.Context, userID, runID uuid.UUID) (*dto.TestRunResponse, error) {
+	originalRun, err := s.runRepo.GetByID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrRunNotFound
+		}
+		return nil, fmt.Errorf("get run: %w", err)
+	}
+
+	// Only terminal non-passed runs can be rerun (failed, cancelled, or setup errors)
+	if originalRun.Status != model.TestRunStatusFailed && originalRun.Status != model.TestRunStatusCancelled {
+		return nil, ErrRunNotRerunnable
+	}
+
+	suite, err := s.suiteRepo.GetByID(ctx, originalRun.TestSuiteID)
+	if err != nil {
+		return nil, fmt.Errorf("get suite: %w", err)
+	}
+
+	repo, err := s.repoRepo.GetByID(ctx, suite.RepositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("get repo: %w", err)
+	}
+	if repo.ForkStatus != model.ForkStatusReady {
+		return nil, ErrForkNotReady
+	}
+
+	// Auth check
+	teamID, err := s.repoRepo.GetTeamIDForRepository(ctx, suite.RepositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("get team: %w", err)
+	}
+	member, err := s.teamMemberRepo.GetByTeamAndUser(ctx, teamID, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotTeamMember
+		}
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+	if member.Role == model.TeamMemberRoleViewer {
+		return nil, ErrNotAdminOrMaintainer
+	}
+
+	// Create new run (same branch/commit, new run number)
+	runNumber, err := s.runRepo.NextRunNumber(ctx, suite.ID)
+	if err != nil {
+		return nil, fmt.Errorf("next run number: %w", err)
+	}
+
+	newRun := &model.TestRun{
+		TestSuiteID: suite.ID,
+		TriggeredBy: &userID,
+		RunNumber:   runNumber,
+		Branch:      originalRun.Branch,
+		CommitHash:  originalRun.CommitHash,
+		Status:      model.TestRunStatusQueued,
+	}
+	if err := s.runRepo.Create(ctx, newRun); err != nil {
+		return nil, fmt.Errorf("create rerun: %w", err)
+	}
+
+	localPath := ""
+	if repo.LocalPath != nil {
+		localPath = *repo.LocalPath
+	}
+
+	payload := &model.JobPayload{
+		TestRunID:          newRun.ID.String(),
+		TestSuiteID:        suite.ID.String(),
+		RepoID:             repo.ID.String(),
+		RepositoryFullName: repo.GithubFullName,
+		LocalPath:          localPath,
+		DefaultBranch:      repo.DefaultBranch,
+		Branch:             originalRun.Branch,
+		CommitHash:         originalRun.CommitHash,
+		SuiteType:          suite.Type,
+		ExecutionMode:      suite.ExecutionMode,
+		TimeoutSeconds:     suite.TimeoutSeconds,
+	}
+
+	// If the original run reached GHA, use GitHub's rerun API.
+	// Otherwise (setup failure before dispatch), do a fresh dispatch.
+	if originalRun.GHARunID != nil {
+		payload.IsRerun = true
+		payload.OriginalGHARunID = *originalRun.GHARunID
+	}
+
+	if err := s.queue.Push(ctx, payload); err != nil {
+		return nil, fmt.Errorf("push rerun job: %w", err)
+	}
+
+	resp := dto.NewTestRunResponse(newRun)
 	return &resp, nil
 }
 

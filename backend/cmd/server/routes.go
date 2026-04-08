@@ -132,6 +132,7 @@ func registerTestRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *confi
 	runs.GET("/:id", runHandler.Get)
 	runs.GET("/:id/logs", runHandler.Logs)
 	runs.POST("/:id/cancel", runHandler.Cancel)
+	runs.POST("/:id/rerun", runHandler.Rerun)
 }
 
 func registerWebhookRoutes(e *echo.Echo, db *sqlx.DB, log zerolog.Logger) {
@@ -172,17 +173,17 @@ func registerHierarchyRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *
 	reports.GET("/:reportId", hierarchyHandler.GetReport)
 }
 
-func registerDiscoveryRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
+func registerImportRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {
 	repoRepo := repository.NewRepositoryRepository(db)
 	userRepo := repository.NewUserRepository(db)
 
-	discoveryService := service.NewDiscoveryService(repoRepo, cfg, log)
-	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
+	importService := service.NewImportService(repoRepo, cfg, log)
+	importHandler := handler.NewImportHandler(importService)
 
 	authMiddleware := mw.Auth(cfg.JWTSecret, userRepo, rdb)
 	repos := e.Group("/v1/repositories", authMiddleware)
-	repos.POST("/:id/discover", discoveryHandler.Discover)
-	repos.GET("/:id/discovery", discoveryHandler.GetDiscovery)
+	repos.GET("/:id/workflows", importHandler.ListWorkflows)
+	repos.POST("/:id/import-suite", importHandler.ImportSuite)
 }
 
 func registerUserRoutes(e *echo.Echo, db *sqlx.DB, rdb *redis.Client, cfg *config.Config, log zerolog.Logger) {

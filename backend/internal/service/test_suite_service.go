@@ -167,6 +167,9 @@ func (s *TestSuiteService) UpdateSuite(ctx context.Context, userID, suiteID uuid
 	if req.TimeoutSeconds != nil {
 		suite.TimeoutSeconds = *req.TimeoutSeconds
 	}
+	if req.WorkflowYAML != nil {
+		suite.WorkflowYAML = req.WorkflowYAML
+	}
 
 	if err := s.suiteRepo.Update(ctx, suite); err != nil {
 		return nil, fmt.Errorf("update test suite: %w", err)

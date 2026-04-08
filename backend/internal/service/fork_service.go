@@ -324,6 +324,30 @@ func (s *ForkService) DispatchWorkflow(ctx context.Context, forkFullName, workfl
 	return nil
 }
 
+// RerunWorkflow re-triggers a completed GHA workflow run via the GitHub rerun API.
+func (s *ForkService) RerunWorkflow(ctx context.Context, forkFullName string, ghaRunID int64) error {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/actions/runs/%d/rerun", forkFullName, ghaRunID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return fmt.Errorf("create rerun request: %w", err)
+	}
+	s.setHeaders(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("rerun workflow: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("rerun failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 // FetchArtifact downloads a named artifact from a completed workflow run.
 func (s *ForkService) FetchArtifact(ctx context.Context, forkFullName string, ghaRunID int64, artifactName string) ([]byte, error) {
 	// List artifacts for the run

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useCallback } from "react";
+import { use, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -42,6 +42,30 @@ export default function CreateTestSuitePage({
   const [templateName, setTemplateName] = useState(defaultTemplate.name);
   const [workflowYaml, setWorkflowYaml] = useState(defaultTemplate.yaml);
   const [submitting, setSubmitting] = useState(false);
+
+  // Pre-fill from import (sessionStorage bridge from ImportSuiteDialog)
+  useEffect(() => {
+    const stored = sessionStorage.getItem("verdox_import_suite");
+    if (!stored) return;
+    sessionStorage.removeItem("verdox_import_suite");
+    try {
+      const data = JSON.parse(stored) as {
+        name?: string;
+        type?: string;
+        timeout_seconds?: number;
+        workflow_yaml?: string;
+      };
+      if (data.name) setName(data.name);
+      if (data.type && TYPE_OPTIONS.includes(data.type)) setType(data.type);
+      if (data.timeout_seconds) setTimeout(data.timeout_seconds);
+      if (data.workflow_yaml) {
+        setWorkflowYaml(data.workflow_yaml);
+        setTemplateName("imported");
+      }
+    } catch {
+      // Ignore corrupt data
+    }
+  }, []);
 
   const handleTemplateChange = useCallback(
     (template: WorkflowTemplate) => {
