@@ -40,7 +40,7 @@ See attached wireframe images (hand-drawn). They define the following screens:
 | **Frontend** | Next.js 14 (App Router), TypeScript, Tailwind CSS |
 | **Database** | PostgreSQL 16 |
 | **Cache/Queue** | Redis 7 (session cache + job queue) |
-| **Test Runner** | Docker-in-Docker (DinD) — spin up ephemeral containers per test run |
+| **Test Runner** | Fork-based GitHub Actions — Verdox forks repos, pushes workflow files, dispatches GHA runs |
 | **Auth** | JWT (access + refresh tokens), bcrypt passwords |
 | **GitHub Integration** | GitHub App or OAuth App + GitHub API v3/v4 |
 | **Reverse Proxy** | Nginx |
@@ -101,7 +101,7 @@ docs/
 │   ├── API.md                # REST API spec — every endpoint, request/response shapes, auth requirements
 │   ├── AUTH.md               # Auth flow — signup, login, JWT refresh, password reset, role checks
 │   ├── GITHUB-INTEGRATION.md # GitHub App/OAuth setup, webhook handling, repo sync, branch/commit fetch
-│   ├── TEST-RUNNER.md        # How tests are executed — Docker-in-Docker, job queue, log streaming, timeouts
+│   ├── TEST-RUNNER.md        # How tests are executed — fork-based GHA, job queue, result ingestion
 │   └── FRONTEND-ROUTES.md    # Next.js route map, page components, layouts, protected routes
 ├── BRAND-PALETTE.md          # Full design tokens (colors, typography, spacing, shadows, radii) — copy from above + expand
 ├── ADMIN-PANEL.md            # Admin features — user management, system config, audit logs
@@ -217,21 +217,20 @@ docs/
         │ Frontend  │       │  Backend    │
         └───────────┘       └──────┬──────┘
                                    │
-                    ┌──────────────┼──────────────┐
-                    │              │              │
-              ┌─────┴─────┐ ┌─────┴─────┐ ┌─────┴─────┐
-              │ PostgreSQL│ │   Redis   │ │  DinD     │
-              │   :5432   │ │   :6379   │ │  Runner   │
-              └───────────┘ └───────────┘ └───────────┘
+                    ┌──────────────┴──────────────┐
+                    │                             │
+              ┌─────┴─────┐               ┌──────┴─────┐
+              │ PostgreSQL│               │   Redis    │
+              │   :5432   │               │   :6379    │
+              └───────────┘               └────────────┘
 ```
 
 ### Docker Compose Services
 - `nginx` — reverse proxy
 - `frontend` — Next.js production build
-- `backend` — Go binary
+- `backend` — Go binary (includes embedded test runner)
 - `postgres` — database
 - `redis` — cache + job queue
-- `runner` — Docker-in-Docker test executor (privileged container)
 
 ---
 
@@ -289,7 +288,7 @@ Generate all docs listed above. Get approval before proceeding.
 ### Phase 3 — Test Execution
 - Test suite CRUD
 - Job queue (Redis-based)
-- Docker-in-Docker test runner
+- Fork-based GitHub Actions test execution
 - Test run triggering, status tracking
 - Log capture and storage
 - Test results display (pass/fail per test)
@@ -339,15 +338,15 @@ Generate all docs listed above. Get approval before proceeding.
 - XSS prevention (Next.js default escaping + CSP headers)
 - Webhook signature verification for GitHub
 - Secrets in `.env`, never in code
-- Privileged DinD container isolated on internal Docker network
+- Test execution isolated via fork-based GitHub Actions (no privileged containers needed)
 
 ---
 
 ## 📌 Key Decisions
 
-1. **Why DinD for test runner?** Isolation. Each test run gets a fresh container. No host contamination. Supports any language's test framework.
+1. **Why fork-based GitHub Actions for test execution?** Verdox forks repos via a service account, pushes workflow files, and dispatches GitHub Actions runs. Users don't need to configure GHA workflows themselves. Each run gets a fresh GHA runner environment with full isolation. No privileged containers or DinD needed on the Verdox host.
 2. **Why Redis for job queue?** Simple, no extra infra. Use Redis lists/streams for job queue. Upgrade to dedicated queue (Asynq) if needed.
-3. **Why not GitHub Actions integration?** This is a self-hosted alternative. Users want to run tests on their own infra without CI vendor lock-in.
+3. **Why fork-based execution rather than user-configured GHA?** Users shouldn't have to maintain Verdox-specific workflow files in their repos. By forking and injecting workflows, Verdox controls the execution environment transparently.
 4. **Why Echo over Gin?** Cleaner middleware API, better error handling patterns, equally performant.
 
 ---

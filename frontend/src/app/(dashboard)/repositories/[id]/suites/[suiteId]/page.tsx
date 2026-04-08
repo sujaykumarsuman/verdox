@@ -37,7 +37,7 @@ import type {
   TestRun,
   TestRunDetailV2,
   TestGroup,
-  TestCaseItem,
+  TestCase,
   RunSummaryV2,
 } from "@/types/test";
 
@@ -582,7 +582,7 @@ function CasesPanel({ runId, groupId }: { runId: string; groupId: string }) {
 
 // ─── Case Row ──────────────────────────────────────────────────────────
 
-function CaseRow({ testCase }: { testCase: TestCaseItem }) {
+function CaseRow({ testCase }: { testCase: TestCase }) {
   const [expanded, setExpanded] = useState(false);
   const hasDetails = testCase.error_message || testCase.stack_trace;
 

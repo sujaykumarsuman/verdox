@@ -1,5 +1,3 @@
-ALTER TABLE users ADD COLUMN ban_reason TEXT;
-
 CREATE TABLE ban_reviews (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       UUID NOT NULL REFERENCES users(id),
@@ -12,4 +10,4 @@ CREATE TABLE ban_reviews (
 );
 
 CREATE INDEX idx_ban_reviews_user_id ON ban_reviews(user_id);
-CREATE INDEX idx_ban_reviews_status ON ban_reviews(status);
+CREATE INDEX idx_ban_reviews_status  ON ban_reviews(status);

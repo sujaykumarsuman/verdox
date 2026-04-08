@@ -34,7 +34,7 @@ Verdox is a self-hosted test orchestration platform that gives engineering teams
 
 ### Deployment Model
 
-Docker Compose + Nginx reverse proxy. All services (Go API, Next.js frontend, PostgreSQL, Redis, Docker-in-Docker runner) are defined as Compose services. Nginx terminates TLS and routes traffic to the API and frontend containers.
+Docker Compose + Nginx reverse proxy. All services (Go API, Next.js frontend, PostgreSQL, Redis) are defined as Compose services. Nginx terminates TLS and routes traffic. Test execution runs on GitHub Actions via fork-based workflow dispatch -- no runner container needed.
 
 ---
 
@@ -53,11 +53,11 @@ Docker Compose + Nginx reverse proxy. All services (Go API, Next.js frontend, Po
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Backend API | Go 1.25+, Echo v4 | RESTful JSON API, JWT authentication |
+| Backend API | Go 1.26+, Echo v4 | RESTful JSON API, JWT authentication |
 | Frontend | Next.js 15 (App Router), TypeScript, Tailwind CSS | Server and client components, SPA navigation |
 | Database | PostgreSQL 17 | Primary data store for all entities |
-| Cache / Sessions | Redis 7 | Token blocklist, session metadata, ephemeral data |
-| Test Runner | Docker-in-Docker (DinD) | Isolated container per test run |
+| Cache / Queue | Redis 7 | Token blocklist, session metadata, job queue, SSE pub/sub |
+| Test Execution | GitHub Actions (fork-based) | Tests run on GHA runners via workflow dispatch on Verdox-managed forks |
 | Reverse Proxy | Nginx | TLS termination, static asset serving, upstream routing |
 | Deployment | Docker Compose | Single-command orchestration of all services |
 
@@ -92,7 +92,7 @@ Docker Compose + Nginx reverse proxy. All services (Go API, Next.js frontend, Po
 |---|---|---|
 | TEST-1 | As a user, I want to create a test suite for a repository, so that I can group related tests under a named configuration. | 1. User provides a suite name, selects the suite type (unit or integration), and associates it with a repository. 2. Suite names must be unique within a repository. 3. The suite is listed on the repo detail page under the appropriate section (Unit Test / Integration Test). |
 | TEST-2 | As a user, I want to configure a test suite with a run command and optional environment variables, so that Verdox knows how to execute my tests. | 1. Configuration form accepts a shell command (e.g., `go test ./...`), working directory (relative to repo root), timeout (default 10 minutes, max 60 minutes), and key-value environment variables. 2. Environment variable values are stored encrypted at rest. 3. Configuration can be updated at any time; changes apply to the next run. |
-| TEST-3 | As a user, I want to trigger a test run for a suite on a specific branch and commit, so that I can validate my code changes. | 1. The "Run" action starts a new test run and returns a run ID. 2. The system clones the repository at the specified commit inside a Docker-in-Docker container. 3. Only one run per suite can be active at a time; concurrent requests return a 409. 4. The total number of concurrent runs across the system is capped (default 5, configurable). |
+| TEST-3 | As a user, I want to trigger a test run for a suite on a specific branch and commit, so that I can validate my code changes. | 1. The "Run" action starts a new test run and returns a run ID. 2. The system dispatches a GitHub Actions workflow on a Verdox-managed fork of the repository. 3. Only one run per suite can be active at a time; concurrent requests return a 409. 4. The total number of concurrent workflow dispatches is capped (default 5, configurable). |
 | TEST-4 | As a user, I want to view the real-time progress of a running test suite, so that I can monitor execution without waiting for completion. | 1. The repo detail page shows a progress bar per suite with pass count / total count. 2. Status updates are delivered via server-sent events (SSE) or polling at 3-second intervals. 3. Possible run statuses: `queued`, `running`, `passed`, `failed`, `cancelled`, `timed_out`. |
 | TEST-5 | As a user, I want to view detailed test results with logs after a run completes, so that I can diagnose failures. | 1. The test run detail page lists each individual test case with name and status (passed, failed, skipped, errored). 2. A "Run Logs" button opens the full stdout/stderr output of the run. 3. Failed test rows are highlighted and sorted to the top. 4. Results are retained for 90 days (configurable). |
 | TEST-6 | As a user, I want to cancel a running test, so that I can stop a stuck or unnecessary execution. | 1. A "Cancel" button is visible on runs with status `queued` or `running`. 2. Cancellation sends SIGTERM to the runner container, followed by SIGKILL after a 10-second grace period. 3. The run status transitions to `cancelled` and the timestamp is recorded. 4. Partial results collected before cancellation are preserved. |

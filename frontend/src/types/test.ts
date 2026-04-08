@@ -154,7 +154,7 @@ export interface TestGroup {
   created_at: string;
 }
 
-export interface TestCaseItem {
+export interface TestCase {
   id: string;
   case_id: string;
   name: string;
@@ -184,7 +184,7 @@ export interface TestRunDetailV2 extends TestRunDetail {
 }
 
 export interface GroupCasesResponse {
-  cases: TestCaseItem[];
+  cases: TestCase[];
   meta: PaginationMeta;
 }
 

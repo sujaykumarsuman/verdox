@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { ResultStatusBadge } from "@/components/test/status-badge";
 import { cn } from "@/lib/utils";
-import type { TestCaseItem } from "@/types/test";
+import type { TestCase } from "@/types/test";
 
 const statusIcons = {
   pass: <CheckCircle2 size={16} className="text-[var(--success)]" />,
@@ -31,7 +31,7 @@ function formatDuration(ms: number | null): string {
 }
 
 interface CaseRowProps {
-  testCase: TestCaseItem;
+  testCase: TestCase;
 }
 
 export function CaseRow({ testCase }: CaseRowProps) {

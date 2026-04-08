@@ -1,7 +1,7 @@
 # Verdox -- Security Design
 
 > Self-hosted test orchestration platform.
-> Go 1.25+ | Echo v4 | Next.js 15 | PostgreSQL 17 | Redis 7 | Docker-in-Docker
+> Go 1.26+ | Echo v4 | Next.js 15 | PostgreSQL 17 | Redis 7 | Fork-based GHA
 
 This document defines the security architecture, controls, and operational
 procedures for the Verdox platform. Every implementation decision described here
@@ -158,7 +158,7 @@ environment variable. Only team admins can set or rotate the team's PAT.
 - Decrypted only when needed for git operations (clone, fetch). The decrypted
   value is not cached and is discarded immediately after use.
 - PAT resolution for repository operations: repository -> owning team -> team's PAT.
-- DinD test containers never receive the PAT.
+- Test execution environments (GHA runners) never receive the team PAT.
 - Rate limiting on PAT endpoints: 5 requests per minute per team admin.
 
 ---
@@ -584,79 +584,48 @@ All webhook events are logged with the following fields:
 
 ---
 
-## 10. Docker-in-Docker (DinD) Security
+## 10. Test Execution Security (Fork-based GHA)
 
 ### 10.1 Architecture
 
-The Verdox test runner uses Docker-in-Docker to execute test suites. The
-architecture consists of two layers:
+Verdox executes tests via GitHub Actions on forked repositories. The platform
+does not run test code on its own infrastructure.
 
 ```
-Host Docker daemon
-  └── verdox-runner (DinD daemon container) ← privileged
-        └── test-container-1               ← NOT privileged
-        └── test-container-2               ← NOT privileged
+Verdox Backend
+  └── Fork Service (creates/manages forks via GitHub API)
+        └── Pushes workflow YAML to fork branch
+        └── Dispatches workflow_dispatch event
+              └── GitHub Actions runs tests on GitHub's infrastructure
+                    └── Results returned via webhook or artifact download
 ```
 
-The DinD daemon container (`verdox-runner`) runs in privileged mode because
-Docker requires elevated capabilities to run a Docker daemon inside a
-container. The test containers spawned by the inner Docker daemon are
-unprivileged.
+### 10.2 Isolation Model
 
-### 10.2 Resource Limits
+Tests run on GitHub-hosted runners (or the repository's configured self-hosted
+runners), providing natural isolation:
 
-Every test container is constrained to prevent resource exhaustion:
+- Each workflow run executes in a fresh virtual machine
+- No access to Verdox infrastructure (PostgreSQL, Redis, backend)
+- No access to other test runs
+- GitHub enforces resource limits and timeouts
 
-| Resource | Limit         | Docker Flag            |
-|----------|---------------|------------------------|
-| CPU      | 2 cores       | `--cpus=2`             |
-| Memory   | 2 GB          | `--memory=2g`          |
-| Disk     | 5 GB tmpfs    | `--tmpfs /tmp:size=5g` |
-| PIDs     | 256 processes | `--pids-limit=256`     |
+### 10.3 Fork Security
 
-These limits prevent a single misbehaving test from consuming all resources on
-the host and affecting other test runs or platform services.
+| Control | Implementation |
+|---------|---------------|
+| Service account isolation | A dedicated GitHub service account owns all forks, separate from user accounts |
+| Workflow file control | Only Verdox-generated workflow YAML is pushed to forks |
+| Branch isolation | Workflow files are pushed to dedicated branches per suite |
+| PAT scope | Service account PAT requires `repo`, `workflow`, `read:org` scopes |
+| Team PAT encryption | Team-level PATs are AES-256-GCM encrypted at rest in the database |
 
-### 10.3 Network Isolation
+### 10.4 Result Ingestion
 
-Test containers are placed on an isolated Docker network with no access to:
-
-- The host network or host services.
-- Other platform services (PostgreSQL, Redis, the Go backend).
-- Other test containers running concurrently.
-
-The isolated network is created per test run and removed after completion.
-
-### 10.4 Filesystem Restrictions
-
-| Restriction             | Implementation                                |
-|-------------------------|-----------------------------------------------|
-| No host volume mounts   | Test containers cannot mount host directories |
-| Read-only root FS       | `--read-only` flag where applicable           |
-| Writable tmpfs only     | Writable directories backed by tmpfs with size limits |
-| Read-only repo clone    | The local repository clone is mounted into the test container as read-only (`-v /path/to/repo:/workspace:ro`) to prevent test code from modifying source files |
-
-### 10.5 Container Lifecycle
-
-- Containers are removed immediately after the test run completes or times out
-  (`defer` pattern in Go with `docker rm -f`).
-- A cleanup goroutine runs periodically to remove any orphaned containers that
-  were not properly cleaned up (e.g., due to a crash).
-- Container names include the test run UUID for traceability.
-
-### 10.6 Image Whitelist
-
-Only pre-approved base images can be used for test containers. The list is
-configurable via environment variable or configuration file. Attempting to use a
-non-whitelisted image results in a rejected test run with a descriptive error.
-
-### 10.7 Docker Socket Isolation
-
-The Docker socket inside the DinD container is never exposed to test containers.
-Test containers cannot spawn additional containers, access the Docker API, or
-escalate privileges through the Docker daemon.
-
-- Local repository clone mounted read-only (-v path:/workspace:ro) into test containers
+- Webhook callbacks use the test run UUID as a bearer token (one-time, per-run)
+- Results are parsed and validated before database insertion
+- Hierarchical payloads are batch-inserted with conflict handling
+- Artifact downloads are ZIP-extracted in memory, not written to disk
 
 ---
 
@@ -749,8 +718,8 @@ controls apply:
 - **Decrypted only when needed:** PATs are decrypted in memory only at the
   moment they are needed for git clone or git pull operations. The decrypted
   value is not cached and is discarded immediately after use.
-- **DinD containers never receive the PAT:** The PAT is used only by the
-  backend worker for git operations. Test containers have no access to it.
+- **GHA runners never receive the team PAT:** The PAT is used only by the
+  backend for GitHub API operations. Test workflows use the service account PAT.
 - **PAT resolution path:** repository -> team (via `team_repositories`) ->
   `teams.github_pat_encrypted`.
 - See [GITHUB-PAT-GUIDE.md](./GITHUB-PAT-GUIDE.md) for detailed PAT creation

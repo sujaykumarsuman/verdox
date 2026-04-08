@@ -10,7 +10,7 @@ Make sure you have the following tools installed before proceeding.
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Go | 1.25+ | [go.dev/dl](https://go.dev/dl) |
+| Go | 1.26+ | [go.dev/dl](https://go.dev/dl) |
 | Node.js | 22+ LTS | [nodejs.org](https://nodejs.org) or [nvm](https://github.com/nvm-sh/nvm) |
 | Docker | 27+ | [docs.docker.com](https://docs.docker.com/get-docker/) |
 | Docker Compose | v2+ | Included with Docker Desktop |
@@ -63,10 +63,10 @@ For more details on PAT configuration, see [GITHUB-PAT-GUIDE.md](./GITHUB-PAT-GU
 ```bash
 git clone git@github.com:sujaykumarsuman/verdox.git
 cd verdox
-cp .env.example .env
+cp .env.example .env.dev
 ```
 
-Open `.env` in your editor and set the required values:
+Open `.env.dev` in your editor and set the required values:
 
 | Variable | Required | What to do |
 |----------|----------|------------|
@@ -80,6 +80,10 @@ Open `.env` in your editor and set the required values:
 | `GITHUB_TOKEN_ENCRYPTION_KEY` | Yes | AES-256-GCM key for encrypting team PATs: `openssl rand -hex 32` |
 
 Everything else in `.env.example` ships with sensible defaults that work out of the box with Docker Compose.
+
+> **Note:** The dev environment uses `.env.dev`. The Makefile's `dev` target
+> automatically loads it via `--env-file .env.dev` for Docker Compose variable
+> substitution. A separate `.env` file is only needed for production deployment.
 
 > **Note:** Team-level GitHub PATs are configured separately by team admins in
 > **Team Settings** after logging in. The service account PAT in `.env` is for
@@ -100,7 +104,7 @@ make dev
 Under the hood this runs:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 Once the services are up, verify that everything is healthy:
@@ -238,7 +242,7 @@ Here is a quick reference of all available Makefile targets.
 | `make dev-frontend` | Start frontend only |
 | `make build` | Build production Docker images |
 | `make up` | Start production stack |
-| `make down` | Stop all services |
+| `make down` | Stop all services and remove volumes |
 | `make logs` | Tail all service logs |
 | `make migrate-up` | Run pending database migrations |
 | `make migrate-down` | Rollback the last migration |

@@ -1,6 +1,6 @@
 # Verdox -- GitHub Integration (LLD)
 
-> Go 1.25+ | Echo v4 | go-github/v60 | Redis 7 | AES-256-GCM
+> Go 1.26+ | Echo v4 | go-github/v60 | Redis 7 | AES-256-GCM
 
 ---
 

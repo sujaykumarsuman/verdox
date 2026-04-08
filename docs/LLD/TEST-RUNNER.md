@@ -1,6 +1,6 @@
 # Verdox -- Fork-Based Test Runner (LLD)
 
-> Go 1.25+ | GitHub Actions | Redis 7 job queue | PostgreSQL 17
+> Go 1.26+ | GitHub Actions | Redis 7 job queue | PostgreSQL 17
 
 ---
 
@@ -476,19 +476,15 @@ Only certain team roles are authorized to trigger test runs via
 
 ## 11. Database Schema (Fork Tracking)
 
+Fork metadata is stored directly on the `repositories` table (no separate fork table):
+
 ```sql
--- Track Verdox-managed forks
-CREATE TABLE repository_forks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    fork_owner VARCHAR(255) NOT NULL,       -- service account username
-    fork_full_name VARCHAR(512) NOT NULL,   -- e.g., "verdox-bot/repo-name"
-    github_fork_id BIGINT,                  -- GitHub's fork ID
-    workflow_sha VARCHAR(64),               -- SHA of last pushed workflow file
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(repository_id)
-);
+-- Fork columns on the repositories table
+fork_full_name   VARCHAR(255),    -- e.g., "verdox-bot/repo-name"
+fork_status      VARCHAR(32) NOT NULL DEFAULT 'none',  -- none/forking/ready/failed
+fork_synced_at   TIMESTAMPTZ,     -- last upstream sync timestamp
+fork_workflow_id VARCHAR(255),    -- workflow file path on the fork
+fork_head_sha    VARCHAR(64)      -- HEAD SHA of the fork branch
 ```
 
 ---
