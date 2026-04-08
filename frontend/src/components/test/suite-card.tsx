@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { triggerRun, deleteTestSuite } from "@/hooks/use-tests";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { TestSuite, TestRun, TestRunDetailV2, RunSummaryV2 } from "@/types/test";
+import type { TestSuite, TestRun, TestRunDetailV2, TestRunListResponse, RunSummaryV2 } from "@/types/test";
 
 interface SuiteCardProps {
   suite: TestSuite;
@@ -62,18 +62,41 @@ export function SuiteCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [summary, setSummary] = useState<RunSummaryV2 | null>(null);
+  const [summaryFromRun, setSummaryFromRun] = useState<TestRun | null>(null);
 
-  // Fetch run detail for summary gauge (only for terminal runs)
+  // Fetch run detail for summary gauge (only for terminal runs).
+  // If the latest run has no summary (e.g. setup failure), look at recent runs
+  // to find one that does.
   const fetchSummary = useCallback(async () => {
     if (!latestRun || latestRun.status === "queued" || latestRun.status === "running") {
       setSummary(null);
+      setSummaryFromRun(null);
       return;
     }
     try {
+      // Try the latest run first
       const data = await api<TestRunDetailV2>(`/v1/runs/${latestRun.id}`);
-      if (data.summary_v2) setSummary(data.summary_v2);
+      if (data.summary_v2) {
+        setSummary(data.summary_v2);
+        setSummaryFromRun(null); // from current run, no indicator needed
+        return;
+      }
+      // No summary on latest run — check recent runs for one with results
+      const recent = await api<TestRunListResponse>(`/v1/suites/${suite.id}/runs?page=1&per_page=5`);
+      if (recent.runs) {
+        for (const run of recent.runs) {
+          if (run.id === latestRun.id) continue;
+          if (run.status !== "passed" && run.status !== "failed") continue;
+          const detail = await api<TestRunDetailV2>(`/v1/runs/${run.id}`);
+          if (detail.summary_v2) {
+            setSummary(detail.summary_v2);
+            setSummaryFromRun(run); // from a previous run
+            return;
+          }
+        }
+      }
     } catch { /* */ }
-  }, [latestRun]);
+  }, [latestRun, suite.id]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
@@ -150,12 +173,19 @@ export function SuiteCard({
           />
           <div className="flex-1 min-w-0">
             {summary ? (
-              <div className="flex items-center gap-4 text-[13px]">
-                <span className="text-text-secondary">{summary.total_jobs} jobs</span>
-                <span className="text-[var(--success)]">{summary.passed} passed</span>
-                {summary.failed > 0 && <span className="text-[var(--danger)]">{summary.failed} failed</span>}
-                {summary.skipped > 0 && <span className="text-[var(--warning)]">{summary.skipped} skipped</span>}
-                <span className="text-text-secondary">{summary.total_cases} cases</span>
+              <div>
+                <div className="flex items-center gap-4 text-[13px]">
+                  <span className="text-text-secondary">{summary.total_jobs} jobs</span>
+                  <span className="text-[var(--success)]">{summary.passed} passed</span>
+                  {summary.failed > 0 && <span className="text-[var(--danger)]">{summary.failed} failed</span>}
+                  {summary.skipped > 0 && <span className="text-[var(--warning)]">{summary.skipped} skipped</span>}
+                  <span className="text-text-secondary">{summary.total_cases} cases</span>
+                </div>
+                {summaryFromRun && (
+                  <div className="text-[11px] text-text-secondary mt-1">
+                    from Run #{summaryFromRun.run_number}
+                  </div>
+                )}
               </div>
             ) : latestRun && isActive ? (
               <div className="flex items-center gap-2 text-[13px] text-text-secondary">
