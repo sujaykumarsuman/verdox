@@ -85,7 +85,11 @@ func Load() (*Config, error) {
 	viper.SetDefault("DB_MAX_OPEN_CONN", 25)
 	viper.SetDefault("DB_MAX_IDLE_CONN", 5)
 	viper.SetDefault("DB_MAX_LIFETIME", 300)
-	viper.SetDefault("JWT_ACCESS_EXPIRY", 15*time.Minute)
+	if appEnv == "development" {
+		viper.SetDefault("JWT_ACCESS_EXPIRY", 24*time.Hour)
+	} else {
+		viper.SetDefault("JWT_ACCESS_EXPIRY", 15*time.Minute)
+	}
 	viper.SetDefault("JWT_REFRESH_DAYS", 7)
 	viper.SetDefault("BCRYPT_COST", 12)
 	viper.SetDefault("LOG_LEVEL", "info")
