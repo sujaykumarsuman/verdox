@@ -3,7 +3,7 @@ tmp_dir = "tmp"
 
 [build]
   bin = "./tmp/server"
-  cmd = "go build -o ./tmp/server ./cmd/server"
+  cmd = "CGO_ENABLED=0 go build -o ./tmp/server ./cmd/server"
   delay = 1000
   exclude_dir = ["tmp", "vendor", "migrations"]
   exclude_file = []
